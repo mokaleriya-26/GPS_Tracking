@@ -124,58 +124,53 @@
     </style>
 </head>
 <body class="text-on-surface bg-background antialiased flex">
-<!-- SIDEBAR -->
-<nav class="docked left-0 h-full w-[280px] bg-on-primary-fixed dark:bg-surface-container-lowest shadow-md fixed left-0 top-0 flex flex-col py-6 z-50">
-<div class="px-6 mb-8 flex items-center gap-3">
-<div class="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-<span class="material-symbols-outlined text-white text-xl">local_shipping</span>
+<!-- SideNavBar (Shared Component) -->
+<nav class="hidden md:flex fixed left-0 top-0 h-full flex-col py-6 bg-on-primary-fixed shadow-md docked left-0 h-full w-[280px] z-50">
+<div class="px-6 mb-8">
+<h1 class="font-headline-md text-headline-md font-bold text-white tracking-tight">TrackFleet</h1>
+<p class="font-label-sm text-label-sm text-primary-fixed-dim opacity-80 mt-1">Fleet Management</p>
 </div>
-<div>
-<h1 class="font-headline-md text-headline-md font-bold text-white dark:text-primary">TrackFleet</h1>
-<p class="font-label-sm text-label-sm text-secondary-fixed-dim">Fleet Management</p>
-</div>
-</div>
-<ul class="flex-1 flex flex-col gap-2 mt-4">
+<ul class="flex-1 px-4 space-y-2">
 <li class="">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors" href="./dashboard.html">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./dashboard.html">
 <span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
-<span class="font-label-md text-label-md">Dashboard</span>
-</a>
+                    Dashboard
+                </a>
 </li>
 <li class="">
-<a class="flex items-center gap-3 py-3 text-primary-fixed-dim dark:text-primary font-bold border-l-4 border-primary-fixed-dim dark:border-primary pl-4 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors bg-white/5" href="./vehicle_list.html">
-<span class="material-symbols-outlined filled-icon" data-icon="directions_car">directions_car</span>
-<span class="font-label-md text-label-md">Vehicles</span>
-</a>
+<a class="flex items-center gap-3 py-3 rounded-lg text-primary-fixed-dim font-bold border-l-4 border-primary-fixed-dim pl-4 bg-white/5 font-label-md text-label-md scale-[0.99] transition-transform duration-150" href="./vehicle_list.html">
+<span class="material-symbols-outlined icon-fill-1" data-icon="directions_car">directions_car</span>
+                    Vehicles
+                </a>
 </li>
 <li class="">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors" href="./report.html">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./report.html">
 <span class="material-symbols-outlined" data-icon="assessment">assessment</span>
-<span class="font-label-md text-label-md">Reports</span>
-</a>
+                    Reports
+                </a>
 </li>
 <li class="">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors" href="#">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
 <span class="material-symbols-outlined" data-icon="handshake">handshake</span>
-<span class="font-label-md text-label-md">Providers</span>
-</a>
+                    Providers
+                </a>
 </li>
 <li class="">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors" href="#">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
 <span class="material-symbols-outlined" data-icon="notifications">notifications</span>
-<span class="font-label-md text-label-md">Notifications</span>
-</a>
+                    Notifications
+                </a>
 </li>
 </ul>
-<div class="mt-auto px-5 border-t border-white/10 pt-4">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors rounded-lg px-2" href="#">
+<div class="px-4 mt-auto space-y-2 pt-6 border-t border-white/10">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
 <span class="material-symbols-outlined" data-icon="settings">settings</span>
-<span class="font-label-md text-label-md">Settings</span>
-</a>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors rounded-lg px-2 mt-1" href="./dashboard.html">
+                Settings
+            </a>
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./dashboard.html">
 <span class="material-symbols-outlined" data-icon="logout">logout</span>
-<span class="font-label-md text-label-md">Logout</span>
-</a>
+                Logout
+            </a>
 </div>
 </nav>
 <!-- TOP NAVBAR -->
@@ -556,4 +551,95 @@ Generate Report
 </div>
 </div>
 </main>
+<script>
+    const fetchVehicleData = async () => {
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            const vId = urlParams.get('id') || 'VH001';
+            
+            const [dataRes, alertsRes] = await Promise.all([
+                fetch('/api/data'),
+                fetch('/api/alerts')
+            ]);
+            if (!dataRes.ok) return;
+
+            const vehicles = await dataRes.json();
+            const alerts = await alertsRes.json();
+            
+            // Filter data for this vehicle
+            const vehicleRecords = vehicles.filter(v => v['Vehicle ID'] === vId);
+            if (vehicleRecords.length === 0) return;
+            
+            // Get latest record
+            vehicleRecords.sort((a, b) => new Date(b['Time']) - new Date(a['Time']));
+            const latest = vehicleRecords[0];
+
+            // Update Header
+            const headerTitles = document.querySelectorAll('h2.font-display-lg');
+            if (headerTitles.length > 0) headerTitles[0].innerText = latest['Vehicle Number'];
+            
+            const spans = document.querySelectorAll('.flex.flex-wrap.items-center span');
+            if (spans.length >= 7) {
+                spans[0].innerHTML = `<span class="material-symbols-outlined text-[16px]">tag</span> ${latest['Vehicle ID']}`;
+                spans[2].innerHTML = `<span class="material-symbols-outlined text-[16px]">person</span> ${latest['Driver Name']}`;
+                let statusColor = latest['Ignition On/Off Alert'] === 'Off' ? 'gray' : 'emerald';
+                let statusText = latest['Ignition On/Off Alert'] === 'Off' ? 'Offline' : 'Tracking';
+                spans[4].className = `inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-${statusColor}-100 text-${statusColor}-800 font-label-sm text-label-sm`;
+                spans[4].innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-${statusColor}-500"></span> ${statusText}`;
+                spans[6].innerHTML = `<span class="material-symbols-outlined text-[16px]">location_on</span> ${latest['Location']}`;
+            }
+
+            // KPIs
+            const kpiValues = document.querySelectorAll('.font-headline-md.text-on-surface');
+            if (kpiValues.length >= 5) {
+                kpiValues[0].innerHTML = `${latest['Speed Max (km/h)']} <span class="text-sm font-normal text-on-surface-variant">km/h</span>`; // Current Speed
+                kpiValues[1].innerHTML = `${Math.max(...vehicleRecords.map(v => parseFloat(v['Speed Max (km/h)'] || 0)))} <span class="text-sm font-normal text-on-surface-variant">km/h</span>`; // Max Speed
+                kpiValues[2].innerHTML = `${Math.min(...vehicleRecords.map(v => parseFloat(v['Speed Min (km/h)'] || 0)))} <span class="text-sm font-normal text-on-surface-variant">km/h</span>`; // Min Speed
+                
+                // Count alerts for this vehicle
+                const vAlerts = alerts.filter(a => a['Vehicle ID'] === vId);
+                kpiValues[3].innerText = vAlerts.length; // Total Alerts
+                kpiValues[4].innerText = latest['No. of Trips Covered by Vehicle'] || '0'; // Total Trips
+            }
+
+            // Driver Info
+            const driverInfo = document.querySelectorAll('.bg-surface.rounded-xl.shadow-elevation-1.border.border-outline-variant\\/30.p-5 .font-label-md');
+            if (driverInfo.length > 0) driverInfo[0].innerText = latest['Driver Name'];
+            const driverId = document.querySelectorAll('.bg-surface.rounded-xl.shadow-elevation-1.border.border-outline-variant\\/30.p-5 .font-body-sm.text-on-surface-variant');
+            if (driverId.length > 1) driverId[1].innerText = `ID: ${latest['Driver ID']}`;
+            
+            const contactSpan = document.querySelectorAll('.font-label-sm.text-on-surface');
+            if (contactSpan.length >= 2) contactSpan[0].innerText = latest['Driver Contact'] || '+91 00000 00000';
+            
+            // Alert History
+            const alertTbody = document.querySelectorAll('tbody')[0];
+            if (alertTbody) {
+                alertTbody.innerHTML = '';
+                vAlerts.slice(0, 5).forEach(a => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-surface-container-lowest transition-colors cursor-pointer group";
+                    const types = a._alertTypes.join(', ');
+                    tr.innerHTML = `
+                        <td class="font-body-sm text-body-sm text-on-surface py-4 flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-full bg-error-container/30 flex items-center justify-center text-error"><span class="material-symbols-outlined text-[16px]">warning</span></div>
+                            ${types}
+                        </td>
+                        <td class="font-body-sm text-body-sm text-on-surface-variant py-4">${new Date(a['Time']).toLocaleString()}</td>
+                        <td class="font-body-sm text-body-sm text-on-surface-variant py-4">${a['Location']}</td>
+                        <td class="py-4"><span class="inline-flex px-2 py-1 rounded text-[11px] font-bold bg-error-container text-on-error-container">HIGH</span></td>
+                        <td class="py-4"><span class="inline-flex px-2 py-1 rounded-full text-[11px] font-semibold border border-outline-variant text-on-surface-variant">Active</span></td>
+                    `;
+                    alertTbody.appendChild(tr);
+                });
+                if (vAlerts.length === 0) {
+                    alertTbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-on-surface-variant">No alerts for this vehicle</td></tr>';
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching vehicle data:', error);
+        }
+    };
+    fetchVehicleData();
+    setInterval(fetchVehicleData, 30000);
+</script>
 </body></html>

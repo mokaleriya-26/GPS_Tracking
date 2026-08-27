@@ -131,65 +131,76 @@
 </div>
 </div>
 <div class="flex items-center gap-4">
-<button class="p-2 text-on-surface-variant hover:text-primary transition-colors relative">
-<span class="material-symbols-outlined">notifications</span>
-<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full"></span>
-</button>
-<img alt="Fleet Manager Profile" class="w-10 h-10 rounded-full object-cover border border-outline-variant" data-alt="A professional headshot of a fleet manager in a modern office setting. The lighting is soft and bright, emphasizing a clean, corporate aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9aQTFAlRI7qqiiOvPGRhQLfyaa0zqPl1F-KWP_0RXMhX43ceVuZP7jBCMZDCJ1N-TvW8JlPC1r5URZzyLeoRK2Ygndu29SYtA2Cyq3zfctEZ7foyz0P3c-Od2xmi840ykcWxmwFEsqo7_fSJcByIeRn2mQFN8c8bMRzGRYomTJIwarxy2pL5fHl_T78GRdxzL5yB9TPvGv6saa2F6Mh2lNumDjOGYmT4LcNqvcXf_SnxJHGGG6XdN"/>
+    <!-- Notification Bell -->
+    <div class="relative">
+        <button id="bell-btn" class="p-2 text-on-surface-variant hover:text-primary transition-colors relative focus:outline-none">
+            <span class="material-symbols-outlined">notifications</span>
+            <span id="bell-badge" class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>
+        </button>
+        <!-- Dropdown -->
+        <div id="notif-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-surface rounded-xl shadow-[0_10px_25px_-5px_rgba(0,0,0,0.1),0_8px_10px_-6px_rgba(0,0,0,0.1)] border border-outline-variant/30 z-50 flex flex-col">
+            <div class="p-4 border-b border-outline-variant flex justify-between items-center bg-surface-bright rounded-t-xl">
+                <h3 class="font-headline-sm text-headline-sm text-on-background">Alerts</h3>
+                <span class="px-2 py-1 bg-error-container text-error text-[10px] font-bold rounded-full">Recent</span>
+            </div>
+            <div id="dropdown-alerts-container" class="max-h-72 overflow-y-auto p-2 space-y-1">
+                <p class="text-center text-on-surface-variant text-sm py-4">Loading alerts...</p>
+            </div>
+            <div class="p-3 border-t border-outline-variant text-center bg-surface-bright rounded-b-xl">
+                <a href="report.html" class="text-primary font-label-md text-label-md hover:underline w-full block">View all in Reports</a>
+            </div>
+        </div>
+    </div>
+    <img alt="Fleet Manager Profile" class="w-10 h-10 rounded-full object-cover border border-outline-variant" data-alt="A professional headshot of a fleet manager in a modern office setting. The lighting is soft and bright, emphasizing a clean, corporate aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9aQTFAlRI7qqiiOvPGRhQLfyaa0zqPl1F-KWP_0RXMhX43ceVuZP7jBCMZDCJ1N-TvW8JlPC1r5URZzyLeoRK2Ygndu29SYtA2Cyq3zfctEZ7foyz0P3c-Od2xmi840ykcWxmwFEsqo7_fSJcByIeRn2mQFN8c8bMRzGRYomTJIwarxy2pL5fHl_T78GRdxzL5yB9TPvGv6saa2F6Mh2lNumDjOGYmT4LcNqvcXf_SnxJHGGG6XdN"/>
 </div>
 </header>
-<!-- SideNavBar -->
-<nav class="fixed left-0 top-0 h-full w-[280px] bg-on-primary-fixed flex flex-col py-6 shadow-md z-50">
-<div class="px-6 mb-8 flex items-center gap-3">
-<div class="w-10 h-10 bg-primary-fixed rounded-lg flex items-center justify-center">
-<span class="material-symbols-outlined text-primary font-bold">local_shipping</span>
-</div>
-<div>
+<!-- SideNavBar (Shared Component) -->
+<nav class="hidden md:flex fixed left-0 top-0 h-full flex-col py-6 bg-on-primary-fixed shadow-md docked left-0 h-full w-[280px] z-50">
+<div class="px-6 mb-8">
 <h1 class="font-headline-md text-headline-md font-bold text-white tracking-tight">TrackFleet</h1>
-<p class="font-label-sm text-label-sm text-primary-fixed-dim">Fleet Management</p>
+<p class="font-label-sm text-label-sm text-primary-fixed-dim opacity-80 mt-1">Fleet Management</p>
 </div>
-</div>
-<ul class="flex flex-col gap-2 flex-1 mt-4">
-<li>
-<a class="flex items-center gap-3 py-3 text-primary-fixed-dim font-bold border-l-4 border-primary-fixed-dim pl-4 bg-white/5" href="./dashboard.html">
-<span class="material-symbols-outlined">dashboard</span>
-<span class="font-label-md text-label-md">Dashboard</span>
-</a>
+<ul class="flex-1 px-4 space-y-2">
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-primary-fixed-dim font-bold border-l-4 border-primary-fixed-dim pl-4 bg-white/5 font-label-md text-label-md scale-[0.99] transition-transform duration-150" href="./dashboard.html">
+<span class="material-symbols-outlined icon-fill-1" data-icon="dashboard">dashboard</span>
+                    Dashboard
+                </a>
 </li>
-<li>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="./vehicle_list.html">
-<span class="material-symbols-outlined">directions_car</span>
-<span class="font-label-md text-label-md">Vehicles</span>
-</a>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./vehicle_list.html">
+<span class="material-symbols-outlined" data-icon="directions_car">directions_car</span>
+                    Vehicles
+                </a>
 </li>
-<li>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="./report.html">
-<span class="material-symbols-outlined">assessment</span>
-<span class="font-label-md text-label-md">Reports</span>
-</a>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./report.html">
+<span class="material-symbols-outlined" data-icon="assessment">assessment</span>
+                    Reports
+                </a>
 </li>
-<li>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="#">
-<span class="material-symbols-outlined">handshake</span>
-<span class="font-label-md text-label-md">Providers</span>
-</a>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="handshake">handshake</span>
+                    Providers
+                </a>
 </li>
-<li>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="#">
-<span class="material-symbols-outlined">notifications</span>
-<span class="font-label-md text-label-md">Notifications</span>
-</a>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+                    Notifications
+                </a>
 </li>
 </ul>
-<div class="mt-auto flex flex-col gap-2 border-t border-white/10 pt-4">
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="#">
-<span class="material-symbols-outlined">settings</span>
-<span class="font-label-md text-label-md">Settings</span>
-</a>
-<a class="flex items-center gap-3 py-3 text-on-secondary-fixed-variant hover:text-white pl-5 hover:bg-white/10 transition-colors" href="./dashboard.html">
-<span class="material-symbols-outlined">logout</span>
-<span class="font-label-md text-label-md">Logout</span>
-</a>
+<div class="px-4 mt-auto space-y-2 pt-6 border-t border-white/10">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                Settings
+            </a>
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./dashboard.html">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+                Logout
+            </a>
 </div>
 </nav>
 <!-- Main Content -->
@@ -224,7 +235,7 @@
 <div class="flex justify-between items-start mb-4">
 <div>
 <p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Total Vehicles</p>
-<h3 class="font-display-lg text-display-lg text-on-background">24</h3>
+<h3 id="kpi-total-vehicles" class="font-display-lg text-display-lg text-on-background">24</h3>
 </div>
 <div class="w-12 h-12 rounded-full bg-surface-container-highest flex items-center justify-center">
 <span class="material-symbols-outlined text-on-surface-variant text-3xl">local_shipping</span>
@@ -239,7 +250,7 @@
 <div class="flex justify-between items-start mb-4">
 <div>
 <p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mb-1">Active Alerts</p>
-<h3 class="font-display-lg text-display-lg text-on-background">12</h3>
+<h3 id="kpi-active-alerts" class="font-display-lg text-display-lg text-on-background">12</h3>
 </div>
 <div class="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center">
 <span class="material-symbols-outlined text-orange-600 text-3xl">warning</span>
@@ -309,7 +320,7 @@
 <div class="p-6 border-b border-outline-variant flex justify-between items-center">
 <h3 class="font-headline-sm text-headline-sm text-on-background">Recent Alerts</h3>
 </div>
-<div class="flex-1 overflow-y-auto p-4 space-y-3">
+<div id="recent-alerts-container" class="flex-1 overflow-y-auto p-4 space-y-3">
 <div class="p-3 bg-error-container/20 border border-error-container rounded-lg flex items-start gap-3">
 <div class="p-2 bg-error-container rounded-full text-error mt-1">
 <span class="material-symbols-outlined text-sm">speed</span>
@@ -351,7 +362,7 @@
 </div>
 </div>
 <div class="p-4 border-t border-outline-variant bg-surface-bright rounded-b-xl">
-<button class="w-full py-2 text-primary font-label-md text-label-md hover:bg-primary-fixed/30 rounded-lg transition-colors">View All Notifications</button>
+<a href="./report.html" class="block text-center w-full py-2 text-primary font-label-md text-label-md hover:bg-primary-fixed/30 rounded-lg transition-colors">View All Notifications</a>
 </div>
 </div>
 <!-- Vehicle Overview Table (Spans 3 columns) -->
@@ -379,7 +390,7 @@
 <th class="p-4 font-label-md text-label-md text-on-surface-variant font-semibold">Last Updated</th>
 </tr>
 </thead>
-<tbody class="font-body-sm text-body-sm text-on-background">
+<tbody id="vehicle-table-body" class="font-body-sm text-body-sm text-on-background">
 <tr class="border-b border-outline-variant/50 hover:bg-surface-container-low transition-colors">
 <td class="p-4 font-medium">MH 04 AB 1234</td>
 <td class="p-4">Rahul Sharma</td>
@@ -425,5 +436,146 @@
 </div>
 </div>
 </div>
+</div>
 </main>
+<script>
+    const fetchDashboardData = async () => {
+        try {
+            const [dataRes, alertsRes] = await Promise.all([
+                fetch('/api/data'),
+                fetch('/api/alerts')
+            ]);
+            
+            if (!dataRes.ok || !alertsRes.ok) return;
+
+            const vehicles = await dataRes.json();
+            const alerts = await alertsRes.json();
+            
+            updateDashboard(vehicles, alerts);
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error);
+        }
+    };
+
+    const updateDashboard = (vehicles, alerts) => {
+        const uniqueVehicles = new Set();
+        vehicles.forEach(v => uniqueVehicles.add(v['Vehicle ID']));
+        
+        const totalVehiclesEl = document.getElementById('kpi-total-vehicles');
+        if (totalVehiclesEl) totalVehiclesEl.innerText = uniqueVehicles.size;
+        
+        const activeAlertsEl = document.getElementById('kpi-active-alerts');
+        if (activeAlertsEl) activeAlertsEl.innerText = alerts.length;
+
+        const tbody = document.getElementById('vehicle-table-body');
+        if (tbody && vehicles.length > 0) {
+            const latestRecords = {};
+            vehicles.forEach(v => {
+                const vId = v['Vehicle ID'];
+                if (!latestRecords[vId] || new Date(v['Time']) > new Date(latestRecords[vId]['Time'])) {
+                    latestRecords[vId] = v;
+                }
+            });
+
+            tbody.innerHTML = '';
+            Object.values(latestRecords).forEach(v => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-outline-variant/50 hover:bg-surface-container-low transition-colors";
+                
+                let statusClass = "bg-green-100 text-green-800 border-green-200";
+                let statusText = "Tracking";
+                if (v['Ignition On/Off Alert'] === 'Off') {
+                    statusClass = "bg-gray-100 text-gray-600 border-gray-200";
+                    statusText = "Offline";
+                }
+                
+                tr.innerHTML = `
+                    <td class="p-4 font-medium">${v['Vehicle Number']}</td>
+                    <td class="p-4">${v['Driver Name']}</td>
+                    <td class="p-4">
+                        <span class="px-2 py-1 ${statusClass} rounded-full text-xs font-medium border">${statusText}</span>
+                    </td>
+                    <td class="p-4">${v['Speed Max (km/h)']} km/h</td>
+                    <td class="p-4 truncate max-w-[200px]" data-location="${v['Location']}">${v['Location']}</td>
+                    <td class="p-4 text-on-surface-variant">${new Date(v['Time']).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        const alertsContainer = document.getElementById('recent-alerts-container');
+        const dropdownContainer = document.getElementById('dropdown-alerts-container');
+        
+        if (alertsContainer) alertsContainer.innerHTML = '';
+        if (dropdownContainer) dropdownContainer.innerHTML = '';
+        
+        alerts.slice(0, 5).forEach(alert => {
+            const types = alert._alertTypes.join(', ');
+            let bgClass = "bg-orange-50 border-orange-100";
+            let iconClass = "bg-orange-100 text-orange-600";
+            let badgeClass = "bg-orange-100 text-orange-800";
+            let badgeText = "Warning";
+            let icon = "warning";
+            
+            if (types.includes('Overspeed') || types.includes('Disconnect')) {
+                bgClass = "bg-error-container/20 border-error-container";
+                iconClass = "bg-error-container text-error";
+                badgeClass = "bg-error-container text-error";
+                badgeText = "Critical";
+                icon = types.includes('Overspeed') ? "speed" : "error";
+            }
+
+            const alertTime = new Date(alert['Time']).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            const eventTime = new Date(alert['Time']).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'}) + ', ' + alertTime;
+
+            const div = document.createElement('div');
+            div.className = `p-3 ${bgClass} border rounded-lg flex items-start gap-3`;
+            div.innerHTML = `
+                <div class="p-2 ${iconClass} rounded-full mt-1">
+                    <span class="material-symbols-outlined text-sm">${icon}</span>
+                </div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-start">
+                        <h4 class="font-label-md text-label-md text-on-background">${types}</h4>
+                        <span class="text-[10px] text-on-surface-variant font-medium">${alertTime}</span>
+                    </div>
+                    <p class="font-body-sm text-body-sm text-on-surface-variant mt-1">${alert['Driver Name']} • ${alert['Vehicle Number']}</p>
+                    <p class="text-[10px] text-on-surface-variant mt-1">Event: ${eventTime}</p>
+                    <span class="inline-block mt-2 px-2 py-0.5 ${badgeClass} text-[10px] font-bold rounded">${badgeText}</span>
+                </div>
+            `;
+            if (alertsContainer) alertsContainer.appendChild(div);
+            
+            // Clone for dropdown
+            if (dropdownContainer) {
+                const dropDiv = div.cloneNode(true);
+                dropdownContainer.appendChild(dropDiv);
+            }
+        });
+        
+        if (alerts.length === 0 && dropdownContainer) {
+            dropdownContainer.innerHTML = '<p class="text-center text-on-surface-variant text-sm py-4">No active alerts</p>';
+        }
+    };
+
+    // Toggle Dropdown
+    const bellBtn = document.getElementById('bell-btn');
+    const notifDropdown = document.getElementById('notif-dropdown');
+    
+    if (bellBtn && notifDropdown) {
+        bellBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            notifDropdown.classList.toggle('hidden');
+        });
+        
+        document.addEventListener('click', (e) => {
+            if (!notifDropdown.contains(e.target) && e.target !== bellBtn) {
+                notifDropdown.classList.add('hidden');
+            }
+        });
+    }
+
+    fetchDashboardData();
+    setInterval(fetchDashboardData, 30000);
+</script>
 </body></html>

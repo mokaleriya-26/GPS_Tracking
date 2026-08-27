@@ -112,48 +112,51 @@
     </style>
 </head>
 <body class="bg-background text-on-background font-body-md antialiased min-h-screen flex">
-<!-- SideNavBar -->
-<nav class="fixed left-0 top-0 h-full flex flex-col py-6 docked left-0 h-full w-[280px] bg-on-primary-fixed dark:bg-surface-container-lowest shadow-md z-50 hidden md:flex">
+<!-- SideNavBar (Shared Component) -->
+<nav class="hidden md:flex fixed left-0 top-0 h-full flex-col py-6 bg-on-primary-fixed shadow-md docked left-0 h-full w-[280px] z-50">
 <div class="px-6 mb-8">
-<div class="flex items-center gap-3">
-<div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center">
-<span class="material-symbols-outlined text-on-primary font-bold">directions_car</span>
+<h1 class="font-headline-md text-headline-md font-bold text-white tracking-tight">TrackFleet</h1>
+<p class="font-label-sm text-label-sm text-primary-fixed-dim opacity-80 mt-1">Fleet Management</p>
 </div>
-<div>
-<h1 class="font-headline-md text-headline-md font-bold text-white dark:text-primary">TrackFleet</h1>
-<p class="font-label-sm text-label-sm text-secondary-fixed-dim">Fleet Management</p>
-</div>
-</div>
-</div>
-<div class="flex-1 overflow-y-auto px-4 space-y-2">
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="./dashboard.html">
-<span class="material-symbols-outlined">dashboard</span>
-                Dashboard
-            </a>
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="./vehicle_list.html">
-<span class="material-symbols-outlined">directions_car</span>
-                Vehicles
-            </a>
-<a class="flex items-center gap-3 py-3 rounded-lg text-primary-fixed-dim dark:text-primary font-bold border-l-4 border-primary-fixed-dim dark:border-primary pl-4 bg-white/5 font-label-md text-label-md scale-[0.99] transition-transform duration-150" href="./report.html">
-<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">assessment</span>
-                Reports
-            </a>
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="#">
-<span class="material-symbols-outlined">handshake</span>
-                Providers
-            </a>
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="#">
-<span class="material-symbols-outlined">notifications</span>
-                Notifications
-            </a>
-</div>
-<div class="px-4 pt-4 mt-auto border-t border-white/10 dark:border-outline-variant space-y-2">
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="#">
-<span class="material-symbols-outlined">settings</span>
+<ul class="flex-1 px-4 space-y-2">
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./dashboard.html">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+                    Dashboard
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./vehicle_list.html">
+<span class="material-symbols-outlined" data-icon="directions_car">directions_car</span>
+                    Vehicles
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-primary-fixed-dim font-bold border-l-4 border-primary-fixed-dim pl-4 bg-white/5 font-label-md text-label-md scale-[0.99] transition-transform duration-150" href="./report.html">
+<span class="material-symbols-outlined icon-fill-1" data-icon="assessment">assessment</span>
+                    Reports
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="handshake">handshake</span>
+                    Providers
+                </a>
+</li>
+<li class="">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+                    Notifications
+                </a>
+</li>
+</ul>
+<div class="px-4 mt-auto space-y-2 pt-6 border-t border-white/10">
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
                 Settings
             </a>
-<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant dark:text-on-surface-variant hover:text-white dark:hover:text-primary pl-5 hover:bg-white/10 dark:hover:bg-surface-container-highest transition-colors font-label-md text-label-md" href="./dashboard.html">
-<span class="material-symbols-outlined">logout</span>
+<a class="flex items-center gap-3 py-3 rounded-lg text-on-secondary-fixed-variant hover:text-white hover:bg-white/10 transition-colors pl-5 font-label-md text-label-md" href="./dashboard.html">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
                 Logout
             </a>
 </div>
@@ -456,4 +459,38 @@
 </section>
 </main>
 </div>
+<script>
+    const fetchReportData = async () => {
+        try {
+            const dataRes = await fetch('/api/data');
+            if (!dataRes.ok) return;
+
+            const vehicles = await dataRes.json();
+            
+            // Get unique vehicles
+            const uniqueVehicles = new Map();
+            vehicles.forEach(v => {
+                if (!uniqueVehicles.has(v['Vehicle ID'])) {
+                    uniqueVehicles.set(v['Vehicle ID'], v['Vehicle Number']);
+                }
+            });
+
+            // Find the select element for Vehicle
+            const selects = document.querySelectorAll('select');
+            if (selects.length > 1) {
+                const vehicleSelect = selects[1];
+                vehicleSelect.innerHTML = '<option>All Vehicles</option>';
+                uniqueVehicles.forEach((vNumber, vId) => {
+                    const option = document.createElement('option');
+                    option.value = vId;
+                    option.innerText = `${vNumber} (${vId})`;
+                    vehicleSelect.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching report data:', error);
+        }
+    };
+    fetchReportData();
+</script>
 </body></html>
