@@ -21,6 +21,8 @@ class NotificationLogSerializer(serializers.ModelSerializer):
 class AlertSerializer(serializers.ModelSerializer):
     vehicle_number = serializers.CharField(source='vehicle.number', read_only=True)
     driver_name = serializers.CharField(source='driver.name', read_only=True)
+    driver_contact = serializers.CharField(source='driver.contact', read_only=True)
+    driver_email = serializers.CharField(source='driver.email', read_only=True)
     notification = NotificationLogSerializer(read_only=True)
 
     class Meta:
