@@ -9,7 +9,7 @@ const Layout = ({ alerts }) => {
       <Navbar alerts={alerts} />
       <div className="d-flex flex-grow-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-grow-1 overflow-auto p-4" style={{ marginLeft: '250px' }}>
+        <main className="flex-grow-1 overflow-auto p-4 app-main">
           <div className="container-fluid max-w-1600">
             <Outlet />
           </div>

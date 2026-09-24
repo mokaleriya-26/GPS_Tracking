@@ -1,7 +1,7 @@
 import React from 'react';
 import { Nav } from 'react-bootstrap';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Car, Users, Map, Bell } from 'lucide-react';
+import { LayoutDashboard, Car, Bell } from 'lucide-react';
 
 const Sidebar = () => {
   const location = useLocation();

@@ -2,11 +2,11 @@ import React from 'react';
 import { Card, Row, Col, Badge, Table, Button } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 
-const Dashboard = ({ vehicles, alerts }) => {
+const Dashboard = ({ vehicles = [], alerts = [] }) => {
   // Vehicles are unique in DRF now (since it's a model), so we just use the length
   const activeVehicles = vehicles.filter(v => v.ignition).length;
   
-  const criticalAlerts = alerts.filter(a => a.alert_type.includes('Overspeed') || a.alert_type.includes('Disconnect')).length;
+  const criticalAlerts = alerts.filter(a => a.alert_type?.includes('Overspeed') || a.alert_type?.includes('Disconnect')).length;
 
   return (
     <>
@@ -96,7 +96,7 @@ const Dashboard = ({ vehicles, alerts }) => {
                 </thead>
                 <tbody style={{ fontSize: '14px' }}>
                   {vehicles.slice(0, 5).map((v, idx) => (
-                    <tr key={idx}>
+                    <tr key={v.vehicle_id || idx}>
                       <td className="px-4 fw-semibold text-dark">{v.number}</td>
                       <td>{v.driver_name || 'Unassigned'}</td>
                       <td>
@@ -105,9 +105,14 @@ const Dashboard = ({ vehicles, alerts }) => {
                         </Badge>
                       </td>
                       <td>{v.speed} km/h</td>
-                      <td><div className="text-truncate" style={{ maxWidth: '200px' }}>{v.location}</div></td>
+                      <td><div className="text-truncate" style={{ maxWidth: '200px' }}>{v.location || 'N/A'}</div></td>
                     </tr>
                   ))}
+                  {vehicles.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="text-center text-muted py-4">No active vehicles found</td>
+                    </tr>
+                  )}
                 </tbody>
               </Table>
             </Card.Body>
@@ -121,14 +126,14 @@ const Dashboard = ({ vehicles, alerts }) => {
             </Card.Header>
             <Card.Body className="p-3 overflow-auto" style={{ maxHeight: '400px' }}>
               {alerts.slice(0, 5).map((alert, idx) => {
-                const isCritical = alert.alert_type.includes('Overspeed') || alert.alert_type.includes('Disconnect');
+                const isCritical = alert.alert_type?.includes('Overspeed') || alert.alert_type?.includes('Disconnect');
                 return (
-                  <div key={idx} className={`p-3 mb-3 border rounded ${isCritical ? 'border-danger bg-opacity-10 bg-danger' : 'border-warning bg-opacity-10 bg-warning'}`}>
+                  <div key={alert.event_id || alert.id || idx} className={`p-3 mb-3 border rounded ${isCritical ? 'border-danger bg-opacity-10 bg-danger' : 'border-warning bg-opacity-10 bg-warning'}`}>
                     <div className="d-flex justify-content-between mb-1">
                       <strong className={isCritical ? 'text-danger' : 'text-warning-emphasis'}>{alert.alert_type}</strong>
-                      <small className="text-muted">{new Date(alert.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</small>
+                      <small className="text-muted">{alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'N/A'}</small>
                     </div>
-                    <div className="text-muted small mb-2">{alert.driver_name} • {alert.vehicle_number}</div>
+                    <div className="text-muted small mb-2">{alert.driver_name || 'Unknown'} • {alert.vehicle_number || 'Unknown'}</div>
                     <Badge bg={isCritical ? 'danger' : 'warning'} text={isCritical ? 'white' : 'dark'}>{isCritical ? 'Critical' : 'Warning'}</Badge>
                   </div>
                 )

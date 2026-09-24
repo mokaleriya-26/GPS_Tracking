@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, Table, Badge } from 'react-bootstrap';
 
-const Vehicles = ({ vehicles }) => {
+const Vehicles = ({ vehicles = [] }) => {
   return (
     <div>
       <div className="mb-4">
@@ -24,7 +24,7 @@ const Vehicles = ({ vehicles }) => {
             </thead>
             <tbody style={{ fontSize: '14px' }}>
               {vehicles.map((v, idx) => (
-                <tr key={idx}>
+                <tr key={v.vehicle_id || idx}>
                   <td className="px-4 fw-semibold text-dark">{v.vehicle_id}</td>
                   <td>{v.number}</td>
                   <td>{v.driver_name || 'Unassigned'}</td>
@@ -34,9 +34,14 @@ const Vehicles = ({ vehicles }) => {
                     </Badge>
                   </td>
                   <td>{v.speed} km/h</td>
-                  <td>{v.location}</td>
+                  <td>{v.location || 'N/A'}</td>
                 </tr>
               ))}
+              {vehicles.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted py-4">No vehicles found</td>
+                </tr>
+              )}
             </tbody>
           </Table>
         </Card.Body>

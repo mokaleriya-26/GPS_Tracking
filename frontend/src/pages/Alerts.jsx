@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, Badge, Row, Col } from 'react-bootstrap';
 import { Mail, Smartphone, MessageSquare, AlertTriangle, AlertCircle } from 'lucide-react';
 
-const Alerts = ({ alerts }) => {
+const Alerts = ({ alerts = [] }) => {
   return (
     <div>
       <div className="mb-4">
@@ -16,10 +16,10 @@ const Alerts = ({ alerts }) => {
         </Card.Header>
         <Card.Body className="p-4">
           {alerts.map((alert, idx) => {
-            const isCritical = alert.alert_type.includes('Overspeed') || alert.alert_type.includes('Disconnect');
+            const isCritical = alert.alert_type?.includes('Overspeed') || alert.alert_type?.includes('Disconnect');
             
             return (
-              <div key={idx} className={`p-4 mb-3 border rounded-3 ${isCritical ? 'border-danger bg-opacity-10 bg-danger' : 'border-warning bg-opacity-10 bg-warning'}`}>
+              <div key={alert.event_id || alert.id || idx} className={`p-4 mb-3 border rounded-3 ${isCritical ? 'border-danger bg-opacity-10 bg-danger' : 'border-warning bg-opacity-10 bg-warning'}`}>
                 <Row>
                   <Col md={1} className="d-flex align-items-center justify-content-center mb-3 mb-md-0">
                     <div className={`p-3 rounded-circle ${isCritical ? 'bg-danger text-white' : 'bg-warning text-dark'}`}>
@@ -30,7 +30,9 @@ const Alerts = ({ alerts }) => {
                     <div className="d-flex justify-content-between align-items-start mb-2">
                       <h5 className="fw-bold mb-0 text-dark">{alert.alert_type}</h5>
                       <small className="text-muted fw-semibold">
-                        {new Date(alert.timestamp).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'})} - {new Date(alert.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                        {alert.timestamp ? (
+                          `${new Date(alert.timestamp).toLocaleDateString([], {day: 'numeric', month: 'short', year: 'numeric'})} - ${new Date(alert.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`
+                        ) : 'N/A'}
                       </small>
                     </div>
                     <Row className="mt-3">
