@@ -5,6 +5,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Vehicles from './pages/Vehicles';
 import Alerts from './pages/Alerts';
+import Reports from './pages/Reports';
 
 function App() {
   const { vehicles, alerts, loading, error } = usePolling(30000);
@@ -24,7 +25,7 @@ function App() {
           <Route index element={<Dashboard vehicles={vehicles} alerts={alerts} />} />
           <Route path="vehicles" element={<Vehicles vehicles={vehicles} />} />
           <Route path="alerts" element={<Alerts alerts={alerts} />} />
-          <Route path="reports" element={<Alerts alerts={alerts} />} />
+          <Route path="reports" element={<Reports vehicles={vehicles} />} />
         </Route>
       </Routes>
     </BrowserRouter>
