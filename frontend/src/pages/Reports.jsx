@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import jsPDF from 'jspdf';
 
 import {
@@ -6,7 +6,8 @@ import {
   CalendarDays,
   BarChart3,
   CalendarRange,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Download
 } from 'lucide-react';
 
 const Reports = ({ vehicles = [] }) => {
@@ -21,6 +22,10 @@ const Reports = ({ vehicles = [] }) => {
 
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+
+  const [showPreview, setShowPreview] = useState(false);
+  const [reportPreview, setReportPreview] = useState(null);
+  const previewRef = useRef(null);
 
   /*
    * ---------------------------------------------------------
@@ -163,12 +168,6 @@ const Reports = ({ vehicles = [] }) => {
       return String(driverId) === String(selectedDriver);
     }) || vehicles[0] || {};
 
-  const vehicleId =
-    selectedVehicle.vehicleId ||
-    selectedVehicle.vehicle_id ||
-    selectedVehicle.id ||
-    'VH001';
-
   const vehicleNumber =
     selectedVehicle.vehicleNumber ||
     selectedVehicle.vehicle_number ||
@@ -212,262 +211,318 @@ const Reports = ({ vehicles = [] }) => {
 
   /*
    * ---------------------------------------------------------
-   * GENERATE PDF
+   * REPORT DEMO DATA
    * ---------------------------------------------------------
    */
 
-  const generatePDF = () => {
-    const doc = new jsPDF();
+  const demoData = {
+    distance: '426.2 km',
+    drivingTime: '7h 15m',
+    averageSpeed: '58 km/h',
+    maximumSpeed: '112 km/h',
+    performanceScore: '86 / 100',
 
-    const generatedDate = new Date().toLocaleDateString('en-IN');
+    totalTrips: '8',
+    totalAlerts: '5',
 
-    /*
-     * -------------------------------------------------------
-     * DEMO VALUES
-     * -------------------------------------------------------
-     */
+    overspeed: '2',
+    harshBraking: '1',
+    gpsDisconnect: '1',
+    ignition: '1',
+    nightDriving: '0'
+  };
 
-    const demoData = {
-      distance: '426.2 km',
-      drivingTime: '7h 15m',
-      averageSpeed: '58 km/h',
-      maximumSpeed: '112 km/h',
-      performanceScore: '86 / 100',
+  const recentAlerts = [
+    ['09:42 AM', 'Overspeed', 'Mumbai-Pune Hwy', '112 km/h'],
+    ['10:18 AM', 'Harsh Braking', 'Lonavala', '71 km/h'],
+    ['11:05 AM', 'GPS Disconnect', 'Pune', '--']
+  ];
 
-      totalTrips: '8',
-      totalAlerts: '5',
+  /*
+   * ---------------------------------------------------------
+   * WORKFLOW: GENERATE REPORT (IN-WEBSITE PREVIEW)
+   * ---------------------------------------------------------
+   */
 
-      overspeed: '2',
-      harshBraking: '1',
-      gpsDisconnect: '1',
-      ignition: '1',
-      nightDriving: '0'
+  const handleGenerateReport = () => {
+    const generatedData = {
+      reportType,
+      driverName: selectedDriverName,
+      vehicleNumber,
+      period: getReportPeriod(),
+      generatedDate: new Date().toLocaleDateString('en-IN'),
+      tripName: selectedTripName,
+      demoData: { ...demoData },
+      alerts: recentAlerts.map((row) => [...row])
     };
 
-    /*
-     * -------------------------------------------------------
-     * PAGE SETTINGS
-     * -------------------------------------------------------
-     */
+    setReportPreview(generatedData);
+    setShowPreview(true);
 
-    const pageWidth = doc.internal.pageSize.getWidth();
+    setTimeout(() => {
+      if (previewRef.current) {
+        previewRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 50);
+  };
 
-    const left = 18;
-    const right = pageWidth - 18;
+  /*
+   * ---------------------------------------------------------
+   * WORKFLOW: MANUAL DOWNLOAD PDF
+   * ---------------------------------------------------------
+   */
+
+  const downloadPDF = (reportData) => {
+    if (!reportData) return;
+
+    const doc = new jsPDF();
+    const left = 16;
+    const right = 194;
+    const contentWidth = 178;
+    const rowHeight = 7.5;
+
+    // Helper: Draw Section Header with subtle separator
+    const drawSectionHeader = (title, y) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, left, y);
+
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.3);
+      doc.line(left, y + 2.5, right, y + 2.5);
+    };
+
+    // Helper: Fill cell background
+    const fillCell = (x, y, w, h, isHeader = false) => {
+      if (isHeader) {
+        doc.setFillColor(248, 250, 252);
+      } else {
+        doc.setFillColor(255, 255, 255);
+      }
+      doc.rect(x, y, w, h, 'F');
+    };
+
+    // Helper: Draw cell text
+    const drawCellText = (text, x, y, isHeader = false) => {
+      if (isHeader) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+      }
+      doc.text(String(text ?? ''), x + 3.5, y + 5.1);
+    };
+
+    let currentY = 18;
 
     /*
      * -------------------------------------------------------
      * HEADER
      * -------------------------------------------------------
      */
-
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
+    doc.setFontSize(20);
+    doc.setTextColor(30, 41, 59);
+    doc.text('TrackFleet', left, currentY);
 
-    doc.text('TrackFleet', left, 20);
-
+    currentY += 6;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Fleet Management System', left, currentY);
 
-    doc.text(
-      'Fleet Management System',
-      left,
-      27
-    );
-
-    doc.setLineWidth(0.7);
-    doc.line(left, 33, right, 33);
+    currentY += 5;
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.6);
+    doc.line(left, currentY, right, currentY);
 
     /*
      * -------------------------------------------------------
      * REPORT TITLE
      * -------------------------------------------------------
      */
-
+    currentY += 10;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(17);
-
-    doc.text(
-      `${reportType} Report`,
-      left,
-      45
-    );
+    doc.setFontSize(15);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${reportData.reportType} Report`, left, currentY);
 
     /*
      * -------------------------------------------------------
      * BASIC INFORMATION
      * -------------------------------------------------------
      */
+    currentY += 5;
+    const basicY = currentY;
+    const basicH = rowHeight * 2;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10.5);
+    fillCell(left, basicY, 26, rowHeight, true);
+    fillCell(left + 26, basicY, 63, rowHeight, false);
+    fillCell(left + 89, basicY, 26, rowHeight, true);
+    fillCell(left + 115, basicY, 63, rowHeight, false);
 
-    doc.text(
-      `Driver: ${selectedDriverName}`,
-      left,
-      55
-    );
+    fillCell(left, basicY + rowHeight, 32, rowHeight, true);
+    fillCell(left + 32, basicY + rowHeight, 57, rowHeight, false);
+    fillCell(left + 89, basicY + rowHeight, 26, rowHeight, true);
+    fillCell(left + 115, basicY + rowHeight, 63, rowHeight, false);
 
-    doc.text(
-      `Vehicle: ${vehicleNumber}`,
-      left,
-      62
-    );
+    drawCellText('Driver:', left, basicY, true);
+    drawCellText(reportData.driverName, left + 26, basicY, false);
+    drawCellText('Vehicle:', left + 89, basicY, true);
+    drawCellText(reportData.vehicleNumber, left + 115, basicY, false);
 
-    doc.text(
-      `Reporting Period: ${getReportPeriod()}`,
-      left,
-      69
-    );
+    drawCellText('Reporting Period:', left, basicY + rowHeight, true);
+    drawCellText(reportData.period, left + 32, basicY + rowHeight, false);
+    drawCellText('Generated:', left + 89, basicY + rowHeight, true);
+    drawCellText(reportData.generatedDate, left + 115, basicY + rowHeight, false);
 
-    doc.text(
-      `Generated: ${generatedDate}`,
-      right,
-      55,
-      { align: 'right' }
-    );
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.rect(left, basicY, contentWidth, basicH);
+    doc.line(left, basicY + rowHeight, right, basicY + rowHeight);
+    doc.line(left + 89, basicY, left + 89, basicY + basicH);
+    doc.line(left + 26, basicY, left + 26, basicY + rowHeight);
+    doc.line(left + 115, basicY, left + 115, basicY + basicH);
+    doc.line(left + 32, basicY + rowHeight, left + 32, basicY + basicH);
+
+    currentY += basicH;
 
     /*
      * -------------------------------------------------------
      * PERFORMANCE SUMMARY
      * -------------------------------------------------------
      */
+    currentY += 8;
+    drawSectionHeader('Performance Summary', currentY);
+    currentY += 5;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
+    const perfY = currentY;
+    const perfH = rowHeight * 2;
+    const perfColW = contentWidth / 3;
 
-    doc.text(
-      'Performance Summary',
-      left,
-      84
-    );
+    fillCell(left, perfY, 22, rowHeight, true);
+    fillCell(left + 22, perfY, perfColW - 22, rowHeight, false);
+    fillCell(left + perfColW, perfY, 26, rowHeight, true);
+    fillCell(left + perfColW + 26, perfY, perfColW - 26, rowHeight, false);
+    fillCell(left + perfColW * 2, perfY, 24, rowHeight, true);
+    fillCell(left + perfColW * 2 + 24, perfY, perfColW - 24, rowHeight, false);
 
+    fillCell(left, perfY + rowHeight, 24, rowHeight, true);
+    fillCell(left + 24, perfY + rowHeight, perfColW - 24, rowHeight, false);
+    fillCell(left + perfColW, perfY + rowHeight, 35, rowHeight, true);
+    fillCell(left + perfColW + 35, perfY + rowHeight, perfColW * 2 - 35, rowHeight, false);
+
+    drawCellText('Distance:', left, perfY, true);
+    drawCellText(reportData.demoData.distance, left + 22, perfY, false);
+    drawCellText('Driving Time:', left + perfColW, perfY, true);
+    drawCellText(reportData.demoData.drivingTime, left + perfColW + 26, perfY, false);
+    drawCellText('Avg. Speed:', left + perfColW * 2, perfY, true);
+    drawCellText(reportData.demoData.averageSpeed, left + perfColW * 2 + 24, perfY, false);
+
+    drawCellText('Max Speed:', left, perfY + rowHeight, true);
+    drawCellText(reportData.demoData.maximumSpeed, left + 24, perfY + rowHeight, false);
+    drawCellText('Performance Score:', left + perfColW, perfY + rowHeight, true);
+    drawCellText(reportData.demoData.performanceScore, left + perfColW + 35, perfY + rowHeight, false);
+
+    doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.3);
-    doc.line(left, 87, right, 87);
+    doc.rect(left, perfY, contentWidth, perfH);
+    doc.line(left, perfY + rowHeight, right, perfY + rowHeight);
+    doc.line(left + perfColW, perfY, left + perfColW, perfY + perfH);
+    doc.line(left + perfColW * 2, perfY, left + perfColW * 2, perfY + rowHeight);
+    doc.line(left + 22, perfY, left + 22, perfY + rowHeight);
+    doc.line(left + perfColW + 26, perfY, left + perfColW + 26, perfY + rowHeight);
+    doc.line(left + perfColW * 2 + 24, perfY, left + perfColW * 2 + 24, perfY + rowHeight);
+    doc.line(left + 24, perfY + rowHeight, left + 24, perfY + perfH);
+    doc.line(left + perfColW + 35, perfY + rowHeight, left + perfColW + 35, perfY + perfH);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10.5);
-
-    /*
-     * First row
-     */
-
-    doc.text(
-      `Distance: ${demoData.distance}`,
-      left,
-      98
-    );
-
-    doc.text(
-      `Driving Time: ${demoData.drivingTime}`,
-      75,
-      98
-    );
-
-    doc.text(
-      `Avg. Speed: ${demoData.averageSpeed}`,
-      140,
-      98
-    );
-
-    /*
-     * Second row
-     */
-
-    doc.text(
-      `Max Speed: ${demoData.maximumSpeed}`,
-      left,
-      106
-    );
-
-    doc.text(
-      `Performance Score: ${demoData.performanceScore}`,
-      75,
-      106
-    );
+    currentY += perfH;
 
     /*
      * -------------------------------------------------------
      * TRIP SUMMARY
      * -------------------------------------------------------
      */
+    currentY += 8;
+    drawSectionHeader('Trip Summary', currentY);
+    currentY += 5;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
+    const tripSumY = currentY;
+    const tripSumH = rowHeight;
+    const halfW = contentWidth / 2;
 
-    doc.text(
-      'Trip Summary',
-      left,
-      124
-    );
+    fillCell(left, tripSumY, 34, tripSumH, true);
+    fillCell(left + 34, tripSumY, halfW - 34, tripSumH, false);
+    fillCell(left + halfW, tripSumY, 30, tripSumH, true);
+    fillCell(left + halfW + 30, tripSumY, halfW - 30, tripSumH, false);
 
-    doc.line(left, 127, right, 127);
+    drawCellText('Trips Completed:', left, tripSumY, true);
+    drawCellText(reportData.demoData.totalTrips, left + 34, tripSumY, false);
+    drawCellText('Total Distance:', left + halfW, tripSumY, true);
+    drawCellText(reportData.demoData.distance, left + halfW + 30, tripSumY, false);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10.5);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.rect(left, tripSumY, contentWidth, tripSumH);
+    doc.line(left + halfW, tripSumY, left + halfW, tripSumY + tripSumH);
+    doc.line(left + 34, tripSumY, left + 34, tripSumY + tripSumH);
+    doc.line(left + halfW + 30, tripSumY, left + halfW + 30, tripSumY + tripSumH);
 
-    doc.text(
-      `Trips Completed: ${demoData.totalTrips}`,
-      left,
-      138
-    );
-
-    doc.text(
-      `Total Distance: ${demoData.distance}`,
-      105,
-      138
-    );
+    currentY += tripSumH;
 
     /*
      * -------------------------------------------------------
-     * SELECTED TRIP
+     * TRIP DETAILS (if reportType === 'Trip')
      * -------------------------------------------------------
      */
+    if (reportData.reportType === 'Trip') {
+      currentY += 8;
+      drawSectionHeader('Trip Details', currentY);
+      currentY += 5;
 
-    if (reportType === 'Trip') {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
+      const tripDetY = currentY;
+      const tripDetH = rowHeight * 3;
 
-      doc.text(
-        'Trip Details',
-        left,
-        154
-      );
+      fillCell(left, tripDetY, 24, rowHeight, true);
+      fillCell(left + 24, tripDetY, contentWidth - 24, rowHeight, false);
 
-      doc.line(left, 157, right, 157);
+      fillCell(left, tripDetY + rowHeight, 24, rowHeight, true);
+      fillCell(left + 24, tripDetY + rowHeight, halfW - 24, rowHeight, false);
+      fillCell(left + halfW, tripDetY + rowHeight, 24, rowHeight, true);
+      fillCell(left + halfW + 24, tripDetY + rowHeight, halfW - 24, rowHeight, false);
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10.5);
+      fillCell(left, tripDetY + rowHeight * 2, 24, rowHeight, true);
+      fillCell(left + 24, tripDetY + rowHeight * 2, halfW - 24, rowHeight, false);
+      fillCell(left + halfW, tripDetY + rowHeight * 2, 24, rowHeight, true);
+      fillCell(left + halfW + 24, tripDetY + rowHeight * 2, halfW - 24, rowHeight, false);
 
-      doc.text(
-        `Route: ${selectedTripName}`,
-        left,
-        168
-      );
+      drawCellText('Route:', left, tripDetY, true);
+      drawCellText(reportData.tripName, left + 24, tripDetY, false);
 
-      doc.text(
-        'Start Time: 08:30 AM',
-        left,
-        176
-      );
+      drawCellText('Start Time:', left, tripDetY + rowHeight, true);
+      drawCellText('08:30 AM', left + 24, tripDetY + rowHeight, false);
+      drawCellText('End Time:', left + halfW, tripDetY + rowHeight, true);
+      drawCellText('12:15 PM', left + halfW + 24, tripDetY + rowHeight, false);
 
-      doc.text(
-        'End Time: 12:15 PM',
-        105,
-        176
-      );
+      drawCellText('Duration:', left, tripDetY + rowHeight * 2, true);
+      drawCellText('3h 45m', left + 24, tripDetY + rowHeight * 2, false);
+      drawCellText('Distance:', left + halfW, tripDetY + rowHeight * 2, true);
+      drawCellText('148.6 km', left + halfW + 24, tripDetY + rowHeight * 2, false);
 
-      doc.text(
-        'Duration: 3h 45m',
-        left,
-        184
-      );
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.3);
+      doc.rect(left, tripDetY, contentWidth, tripDetH);
+      doc.line(left, tripDetY + rowHeight, right, tripDetY + rowHeight);
+      doc.line(left, tripDetY + rowHeight * 2, right, tripDetY + rowHeight * 2);
+      doc.line(left + 24, tripDetY, left + 24, tripDetY + tripDetH);
+      doc.line(left + halfW, tripDetY + rowHeight, left + halfW, tripDetY + tripDetH);
+      doc.line(left + halfW + 24, tripDetY + rowHeight, left + halfW + 24, tripDetY + tripDetH);
 
-      doc.text(
-        'Distance: 148.6 km',
-        105,
-        184
-      );
+      currentY += tripDetH;
     }
 
     /*
@@ -475,191 +530,129 @@ const Reports = ({ vehicles = [] }) => {
      * ALERT SUMMARY
      * -------------------------------------------------------
      */
+    currentY += 8;
+    drawSectionHeader('Alert Summary', currentY);
+    currentY += 5;
 
-    const alertStartY =
-      reportType === 'Trip'
-        ? 201
-        : 154;
+    const alertSumY = currentY;
+    const alertSumH = rowHeight * 3;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
+    fillCell(left, alertSumY, 28, rowHeight, true);
+    fillCell(left + 28, alertSumY, halfW - 28, rowHeight, false);
+    fillCell(left + halfW, alertSumY, 28, rowHeight, true);
+    fillCell(left + halfW + 28, alertSumY, halfW - 28, rowHeight, false);
 
-    doc.text(
-      'Alert Summary',
-      left,
-      alertStartY
-    );
+    fillCell(left, alertSumY + rowHeight, 28, rowHeight, true);
+    fillCell(left + 28, alertSumY + rowHeight, halfW - 28, rowHeight, false);
+    fillCell(left + halfW, alertSumY + rowHeight, 30, rowHeight, true);
+    fillCell(left + halfW + 30, alertSumY + rowHeight, halfW - 30, rowHeight, false);
 
-    doc.line(
-      left,
-      alertStartY + 3,
-      right,
-      alertStartY + 3
-    );
+    fillCell(left, alertSumY + rowHeight * 2, 28, rowHeight, true);
+    fillCell(left + 28, alertSumY + rowHeight * 2, halfW - 28, rowHeight, false);
+    fillCell(left + halfW, alertSumY + rowHeight * 2, 28, rowHeight, true);
+    fillCell(left + halfW + 28, alertSumY + rowHeight * 2, halfW - 28, rowHeight, false);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10.5);
+    drawCellText('Total Alerts:', left, alertSumY, true);
+    drawCellText(reportData.demoData.totalAlerts, left + 28, alertSumY, false);
+    drawCellText('Overspeed:', left + halfW, alertSumY, true);
+    drawCellText(reportData.demoData.overspeed, left + halfW + 28, alertSumY, false);
 
-    const alertY = alertStartY + 15;
+    drawCellText('Harsh Braking:', left, alertSumY + rowHeight, true);
+    drawCellText(reportData.demoData.harshBraking, left + 28, alertSumY + rowHeight, false);
+    drawCellText('GPS Disconnect:', left + halfW, alertSumY + rowHeight, true);
+    drawCellText(reportData.demoData.gpsDisconnect, left + halfW + 30, alertSumY + rowHeight, false);
 
-    /*
-     * Alert row 1
-     */
+    drawCellText('Ignition:', left, alertSumY + rowHeight * 2, true);
+    drawCellText(reportData.demoData.ignition, left + 28, alertSumY + rowHeight * 2, false);
+    drawCellText('Night Driving:', left + halfW, alertSumY + rowHeight * 2, true);
+    drawCellText(reportData.demoData.nightDriving, left + halfW + 28, alertSumY + rowHeight * 2, false);
 
-    doc.text(
-      `Total Alerts: ${demoData.totalAlerts}`,
-      left,
-      alertY
-    );
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.rect(left, alertSumY, contentWidth, alertSumH);
+    doc.line(left, alertSumY + rowHeight, right, alertSumY + rowHeight);
+    doc.line(left, alertSumY + rowHeight * 2, right, alertSumY + rowHeight * 2);
+    doc.line(left + halfW, alertSumY, left + halfW, alertSumY + alertSumH);
+    doc.line(left + 28, alertSumY, left + 28, alertSumY + alertSumH);
+    doc.line(left + halfW + 28, alertSumY, left + halfW + 28, alertSumY + rowHeight);
+    doc.line(left + halfW + 30, alertSumY + rowHeight, left + halfW + 30, alertSumY + rowHeight * 2);
+    doc.line(left + halfW + 28, alertSumY + rowHeight * 2, left + halfW + 28, alertSumY + alertSumH);
 
-    doc.text(
-      `Overspeed: ${demoData.overspeed}`,
-      105,
-      alertY
-    );
-
-    /*
-     * Alert row 2
-     */
-
-    doc.text(
-      `Harsh Braking: ${demoData.harshBraking}`,
-      left,
-      alertY + 9
-    );
-
-    doc.text(
-      `GPS Disconnect: ${demoData.gpsDisconnect}`,
-      105,
-      alertY + 9
-    );
-
-    /*
-     * Alert row 3
-     */
-
-    doc.text(
-      `Ignition: ${demoData.ignition}`,
-      left,
-      alertY + 18
-    );
-
-    doc.text(
-      `Night Driving: ${demoData.nightDriving}`,
-      105,
-      alertY + 18
-    );
+    currentY += alertSumH;
 
     /*
      * -------------------------------------------------------
-     * RECENT ALERTS
+     * RECENT ALERTS TABLE
      * -------------------------------------------------------
      */
+    currentY += 8;
+    drawSectionHeader('Recent Alerts', currentY);
+    currentY += 5;
 
-    const recentAlertY = alertY + 36;
+    const alertTableY = currentY;
+    const alertCols = [32, 44, 64, 38];
+    const alertHeaders = ['Time', 'Alert Type', 'Location', 'Speed'];
+    const totalAlertRows = 1 + reportData.alerts.length;
+    const alertTableH = totalAlertRows * rowHeight;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
+    doc.setFillColor(241, 245, 249);
+    doc.rect(left, alertTableY, contentWidth, rowHeight, 'F');
 
-    doc.text(
-      'Recent Alerts',
-      left,
-      recentAlertY
-    );
-
-    doc.line(
-      left,
-      recentAlertY + 3,
-      right,
-      recentAlertY + 3
-    );
-
-    /*
-     * Table Header
-     */
-
-    const tableY = recentAlertY + 14;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-
-    doc.text('Time', left, tableY);
-    doc.text('Alert Type', 48, tableY);
-    doc.text('Location', 105, tableY);
-    doc.text('Speed', 160, tableY);
-
-    doc.line(
-      left,
-      tableY + 3,
-      right,
-      tableY + 3
-    );
-
-    /*
-     * Alert rows
-     */
-
-    const alerts = [
-      ['09:42 AM', 'Overspeed', 'Mumbai-Pune Hwy', '112 km/h'],
-      ['10:18 AM', 'Harsh Braking', 'Lonavala', '71 km/h'],
-      ['11:05 AM', 'GPS Disconnect', 'Pune', '--']
-    ];
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-
-    alerts.forEach((alert, index) => {
-      const rowY = tableY + 13 + index * 10;
-
-      doc.text(alert[0], left, rowY);
-      doc.text(alert[1], 48, rowY);
-      doc.text(alert[2], 105, rowY);
-      doc.text(alert[3], 160, rowY);
+    let curX = left;
+    alertHeaders.forEach((hdr, idx) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(51, 65, 85);
+      doc.text(hdr, curX + 3.5, alertTableY + 5.1);
+      curX += alertCols[idx];
     });
+
+    reportData.alerts.forEach((alertRow, rIdx) => {
+      const rowY = alertTableY + rowHeight * (rIdx + 1);
+      let rX = left;
+      alertRow.forEach((cellVal, cIdx) => {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(15, 23, 42);
+        doc.text(String(cellVal), rX + 3.5, rowY + 5.1);
+        rX += alertCols[cIdx];
+      });
+    });
+
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.3);
+    doc.rect(left, alertTableY, contentWidth, alertTableH);
+    for (let r = 1; r < totalAlertRows; r++) {
+      doc.line(left, alertTableY + rowHeight * r, right, alertTableY + rowHeight * r);
+    }
+    let colDividerX = left;
+    for (let c = 0; c < alertCols.length - 1; c++) {
+      colDividerX += alertCols[c];
+      doc.line(colDividerX, alertTableY, colDividerX, alertTableY + alertTableH);
+    }
 
     /*
      * -------------------------------------------------------
      * FOOTER
      * -------------------------------------------------------
      */
-
+    doc.setDrawColor(203, 213, 225);
     doc.setLineWidth(0.4);
-
-    doc.line(
-      left,
-      275,
-      right,
-      275
-    );
+    doc.line(left, 280, right, 280);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
-
-    doc.text(
-      'TrackFleet',
-      left,
-      283
-    );
-
-    doc.text(
-      `Generated ${generatedDate}`,
-      right,
-      283,
-      { align: 'right' }
-    );
+    doc.setTextColor(100, 116, 139);
+    doc.text('TrackFleet', left, 286);
+    doc.text(`Generated ${reportData.generatedDate}`, right, 286, { align: 'right' });
 
     /*
      * -------------------------------------------------------
      * SAVE
      * -------------------------------------------------------
      */
-
-    const safeReportType =
-      reportType.replace(/\s+/g, '-');
-
-    doc.save(
-      `TrackFleet-${safeReportType}-Report.pdf`
-    );
+    const safeReportType = reportData.reportType.replace(/\s+/g, '-');
+    doc.save(`TrackFleet-${safeReportType}-Report.pdf`);
   };
 
   /*
@@ -676,6 +669,8 @@ const Reports = ({ vehicles = [] }) => {
     setSelectedMonth('');
     setCustomFrom('');
     setCustomTo('');
+    setShowPreview(false);
+    setReportPreview(null);
   };
 
   /*
@@ -1034,9 +1029,9 @@ const Reports = ({ vehicles = [] }) => {
             <button
               type="button"
               className="btn btn-primary px-4 py-2"
-              onClick={generatePDF}
+              onClick={handleGenerateReport}
             >
-              Generate PDF Report
+              Generate Report
             </button>
 
           </div>
@@ -1044,6 +1039,363 @@ const Reports = ({ vehicles = [] }) => {
         </div>
 
       </div>
+
+      {/* GENERATED REPORT PREVIEW */}
+
+      {showPreview && reportPreview && (
+        <div ref={previewRef} className="mt-5 mb-5">
+
+          {/* PREVIEW TOOLBAR */}
+          <div className="d-flex flex-wrap justify-content-between align-items-center bg-white border rounded-4 p-3 px-4 mb-4 shadow-sm">
+            <div>
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <span className="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 fw-semibold">
+                  Report Preview
+                </span>
+                <span className="fw-bold text-dark fs-5">
+                  {reportPreview.reportType} Report
+                </span>
+              </div>
+              <p className="text-muted small mb-0">
+                Review the report below. Click &quot;Download PDF&quot; when you are ready to save a copy.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-primary d-inline-flex align-items-center gap-2 px-4 py-2 fw-semibold shadow-sm mt-3 mt-sm-0"
+              onClick={() => downloadPDF(reportPreview)}
+            >
+              <Download size={18} />
+              Download PDF
+            </button>
+          </div>
+
+          {/* REPORT DOCUMENT PAPER */}
+          <div
+            className="bg-white border rounded-4 p-4 p-md-5 shadow-sm mx-auto"
+            style={{
+              maxWidth: '920px',
+              color: '#0f172a',
+              backgroundColor: '#ffffff'
+            }}
+          >
+
+            {/* HEADER */}
+            <div
+              className="d-flex justify-content-between align-items-start pb-3 border-bottom mb-4"
+              style={{ borderColor: '#cbd5e1' }}
+            >
+              <div>
+                <h2 className="fw-bold mb-1" style={{ color: '#1e293b', letterSpacing: '-0.5px' }}>
+                  TrackFleet
+                </h2>
+                <p className="text-secondary small mb-0">
+                  Fleet Management System
+                </p>
+              </div>
+              <div className="text-end">
+                <span
+                  className="badge px-3 py-2 fw-semibold"
+                  style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}
+                >
+                  Official Report
+                </span>
+              </div>
+            </div>
+
+            {/* REPORT TITLE */}
+            <div className="mb-4">
+              <h4 className="fw-bold mb-0" style={{ color: '#0f172a' }}>
+                {reportPreview.reportType} Report
+              </h4>
+            </div>
+
+            {/* BASIC INFORMATION */}
+            <div className="table-responsive mb-4">
+              <table
+                className="table table-bordered mb-0 align-middle"
+                style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+              >
+                <tbody>
+                  <tr>
+                    <td className="fw-bold py-2.5 px-3" style={{ width: '20%', backgroundColor: '#f8fafc', color: '#475569' }}>
+                      Driver:
+                    </td>
+                    <td className="py-2.5 px-3" style={{ width: '30%', color: '#0f172a' }}>
+                      {reportPreview.driverName}
+                    </td>
+                    <td className="fw-bold py-2.5 px-3" style={{ width: '20%', backgroundColor: '#f8fafc', color: '#475569' }}>
+                      Vehicle:
+                    </td>
+                    <td className="py-2.5 px-3" style={{ width: '30%', color: '#0f172a' }}>
+                      {reportPreview.vehicleNumber}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="fw-bold py-2.5 px-3" style={{ backgroundColor: '#f8fafc', color: '#475569' }}>
+                      Reporting Period:
+                    </td>
+                    <td className="py-2.5 px-3" style={{ color: '#0f172a' }}>
+                      {reportPreview.period}
+                    </td>
+                    <td className="fw-bold py-2.5 px-3" style={{ backgroundColor: '#f8fafc', color: '#475569' }}>
+                      Generated:
+                    </td>
+                    <td className="py-2.5 px-3" style={{ color: '#0f172a' }}>
+                      {reportPreview.generatedDate}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* PERFORMANCE SUMMARY */}
+            <div className="mb-4">
+              <h5 className="fw-bold mb-2" style={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                Performance Summary
+              </h5>
+              <div className="border-bottom mb-3" style={{ borderColor: '#e2e8f0' }}></div>
+              <div className="table-responsive">
+                <table
+                  className="table table-bordered mb-0 align-middle"
+                  style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+                >
+                  <tbody>
+                    <tr>
+                      <td className="py-2.5 px-3" style={{ width: '33.33%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Distance:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.distance}</span>
+                      </td>
+                      <td className="py-2.5 px-3" style={{ width: '33.33%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Driving Time:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.drivingTime}</span>
+                      </td>
+                      <td className="py-2.5 px-3" style={{ width: '33.34%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Avg. Speed:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.averageSpeed}</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-2.5 px-3">
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Max Speed:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.maximumSpeed}</span>
+                      </td>
+                      <td className="py-2.5 px-3" colSpan={2}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Performance Score:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.performanceScore}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* TRIP SUMMARY */}
+            <div className="mb-4">
+              <h5 className="fw-bold mb-2" style={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                Trip Summary
+              </h5>
+              <div className="border-bottom mb-3" style={{ borderColor: '#e2e8f0' }}></div>
+              <div className="table-responsive">
+                <table
+                  className="table table-bordered mb-0 align-middle"
+                  style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+                >
+                  <tbody>
+                    <tr>
+                      <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Trips Completed:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.totalTrips}</span>
+                      </td>
+                      <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Total Distance:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.distance}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* TRIP DETAILS (if reportType === 'Trip') */}
+            {reportPreview.reportType === 'Trip' && (
+              <div className="mb-4">
+                <h5 className="fw-bold mb-2" style={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                  Trip Details
+                </h5>
+                <div className="border-bottom mb-3" style={{ borderColor: '#e2e8f0' }}></div>
+                <div className="table-responsive">
+                  <table
+                    className="table table-bordered mb-0 align-middle"
+                    style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+                  >
+                    <tbody>
+                      <tr>
+                        <td className="py-2.5 px-3" colSpan={2}>
+                          <span className="fw-bold me-2" style={{ color: '#475569' }}>Route:</span>
+                          <span style={{ color: '#0f172a' }}>{reportPreview.tripName}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                          <span className="fw-bold me-2" style={{ color: '#475569' }}>Start Time:</span>
+                          <span style={{ color: '#0f172a' }}>08:30 AM</span>
+                        </td>
+                        <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                          <span className="fw-bold me-2" style={{ color: '#475569' }}>End Time:</span>
+                          <span style={{ color: '#0f172a' }}>12:15 PM</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-3">
+                          <span className="fw-bold me-2" style={{ color: '#475569' }}>Duration:</span>
+                          <span style={{ color: '#0f172a' }}>3h 45m</span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="fw-bold me-2" style={{ color: '#475569' }}>Distance:</span>
+                          <span style={{ color: '#0f172a' }}>148.6 km</span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* ALERT SUMMARY */}
+            <div className="mb-4">
+              <h5 className="fw-bold mb-2" style={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                Alert Summary
+              </h5>
+              <div className="border-bottom mb-3" style={{ borderColor: '#e2e8f0' }}></div>
+              <div className="table-responsive">
+                <table
+                  className="table table-bordered mb-0 align-middle"
+                  style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+                >
+                  <tbody>
+                    <tr>
+                      <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Total Alerts:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.totalAlerts}</span>
+                      </td>
+                      <td className="py-2.5 px-3" style={{ width: '50%' }}>
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Overspeed:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.overspeed}</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-2.5 px-3">
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Harsh Braking:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.harshBraking}</span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>GPS Disconnect:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.gpsDisconnect}</span>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-2.5 px-3">
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Ignition:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.ignition}</span>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="fw-bold me-2" style={{ color: '#475569' }}>Night Driving:</span>
+                        <span style={{ color: '#0f172a' }}>{reportPreview.demoData.nightDriving}</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* RECENT ALERTS */}
+            <div className="mb-4">
+              <h5 className="fw-bold mb-2" style={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                Recent Alerts
+              </h5>
+              <div className="border-bottom mb-3" style={{ borderColor: '#e2e8f0' }}></div>
+              <div className="table-responsive">
+                <table
+                  className="table table-bordered mb-0 align-middle"
+                  style={{ borderColor: '#cbd5e1', fontSize: '0.9rem' }}
+                >
+                  <thead style={{ backgroundColor: '#f1f5f9' }}>
+                    <tr>
+                      <th
+                        className="fw-bold py-2.5 px-3 border"
+                        style={{ width: '20%', color: '#334155', backgroundColor: '#f1f5f9' }}
+                      >
+                        Time
+                      </th>
+                      <th
+                        className="fw-bold py-2.5 px-3 border"
+                        style={{ width: '25%', color: '#334155', backgroundColor: '#f1f5f9' }}
+                      >
+                        Alert Type
+                      </th>
+                      <th
+                        className="fw-bold py-2.5 px-3 border"
+                        style={{ width: '35%', color: '#334155', backgroundColor: '#f1f5f9' }}
+                      >
+                        Location
+                      </th>
+                      <th
+                        className="fw-bold py-2.5 px-3 border"
+                        style={{ width: '20%', color: '#334155', backgroundColor: '#f1f5f9' }}
+                      >
+                        Speed
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportPreview.alerts.map((alert, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2.5 px-3 border" style={{ color: '#0f172a' }}>
+                          {alert[0]}
+                        </td>
+                        <td className="py-2.5 px-3 border" style={{ color: '#0f172a' }}>
+                          {alert[1]}
+                        </td>
+                        <td className="py-2.5 px-3 border" style={{ color: '#0f172a' }}>
+                          {alert[2]}
+                        </td>
+                        <td className="py-2.5 px-3 border" style={{ color: '#0f172a' }}>
+                          {alert[3]}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* FOOTER */}
+            <div
+              className="d-flex justify-content-between align-items-center pt-3 border-top mt-4"
+              style={{ borderColor: '#cbd5e1', color: '#64748b', fontSize: '0.85rem' }}
+            >
+              <span>TrackFleet</span>
+              <span>Generated {reportPreview.generatedDate}</span>
+            </div>
+
+          </div>
+
+          {/* BOTTOM DOWNLOAD ACTION */}
+          <div className="d-flex justify-content-center mt-4">
+            <button
+              type="button"
+              className="btn btn-primary d-inline-flex align-items-center gap-2 px-4 py-2 fw-semibold shadow-sm"
+              onClick={() => downloadPDF(reportPreview)}
+            >
+              <Download size={18} />
+              Download PDF
+            </button>
+          </div>
+
+        </div>
+      )}
 
     </div>
   );
