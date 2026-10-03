@@ -1,7 +1,11 @@
-flask==3.0.3
-flask-cors==4.0.1
-scikit-learn==1.4.2
-numpy==1.26.4
-pandas==2.2.2
-gunicorn==22.0.0
-python-dotenv==1.0.1
+# GPS Fleet AI/ML Service — Python dependencies
+# Tested with Python 3.11
+#
+# Only packages directly imported by main.py are listed here.
+# scikit-learn, numpy, pandas are intentionally excluded — not imported by main.py.
+# The safety score algorithm is pure Python arithmetic (no ML library needed).
+
+flask>=3.0.0
+flask-cors>=4.0.0
+gunicorn>=21.0.0        # Production WSGI server (used via start-ai-service.sh)
+python-dotenv>=1.0.0    # Reads .env file when running locally

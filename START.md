@@ -1,25 +1,148 @@
-# START.md — How to Run the GPS Fleet Tracking System
+# TrackFleet GPS Fleet Tracking — Setup Guide
 
-> **TL;DR:** 3 terminals. Backend → Frontend → AI Service (optional).
+> **Quick summary:** 3 services to run. Takes ~10 minutes from clone to running app.
 
 ---
 
-## Quick Start (macOS / WSL2)
+## Prerequisites
 
-### Step 1 — Start Backend (Spring Boot)
+Install these before starting:
+
+| Tool | Version | Download |
+|------|---------|---------|
+| Java JDK | 17 or 21 | https://adoptium.net |
+| Apache Maven | 3.9+ | https://maven.apache.org/download |
+| Node.js + npm | 20+ | https://nodejs.org |
+| Python | 3.11+ | https://python.org/downloads |
+| PostgreSQL + PostGIS | 17 | See below |
+
+### PostgreSQL + PostGIS
+
+**macOS:**
+```bash
+brew install postgresql@17 postgis
+brew services start postgresql@17
+```
+
+**Windows (Docker — easiest):**
+```bash
+docker compose up -d postgres
+```
+
+**Windows (native):** Download PostgreSQL 17 from https://www.postgresql.org/download/windows/ and install the PostGIS bundle via Stack Builder after installation.
+
+---
+
+## 1. Clone the Repository
+
+```bash
+git clone https://github.com/mokaleriya-26/GPS_Tracking.git
+cd GPS_Tracking
+```
+
+---
+
+## 2. Create Environment File
+
+```bash
+# macOS / Linux
+cp .env.example .env
+
+# Windows (Command Prompt)
+copy .env.example .env
+```
+
+Open `.env` and fill in your values:
+
+```env
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=gps_tracking
+DB_USERNAME=postgres
+DB_PASSWORD=your_password_here   # ← change this
+```
+
+> Email (Gmail) and SMS (MSG91) credentials are optional for development.
+> Leave them as placeholders if you only want to test locally.
+
+---
+
+## 3. Set Up Database
+
+### macOS / Linux
+
+```bash
+psql postgres -c "CREATE DATABASE gps_tracking;"
+psql gps_tracking -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+psql -d gps_tracking -f data/seed.sql
+```
+
+### Windows (Command Prompt — native PostgreSQL)
+
+```cmd
+psql -U postgres -c "CREATE DATABASE gps_tracking;"
+psql -U postgres -d gps_tracking -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+psql -U postgres -d gps_tracking -f data\seed.sql
+```
+
+### Windows (Docker)
+
+```bash
+# Start PostgreSQL in Docker first
+docker compose up -d postgres
+
+# Wait ~10 seconds, then load seed data
+docker exec -i gps_postgres psql -U postgres -d gps_tracking < data/seed.sql
+```
+
+> **Seed data:** 17 drivers · 20 vehicles · 9,182 trips · 11,089 alerts (6 months of demo data)
+
+---
+
+## 4. Start Spring Boot Backend
+
+Flyway migrations (V1–V6) run automatically on first start.
+
+### macOS / Linux
 
 ```bash
 cd backend-spring
+
+# Load .env variables and start
 export $(grep -v '^#' ../.env | xargs)
 java -jar target/tracking-1.0.0.jar
 ```
 
-Or rebuild first:
+If you haven't built the jar yet:
 ```bash
 cd backend-spring
-export $(grep -v '^#' ../.env | xargs)
 mvn clean package -DskipTests
+export $(grep -v '^#' ../.env | xargs)
 java -jar target/tracking-1.0.0.jar
+```
+
+### Windows (Command Prompt)
+
+```cmd
+cd backend-spring
+
+REM Set environment variables from .env
+for /f "usebackq tokens=1,* delims==" %%A in (`findstr /v "^#" ..\env`) do set %%A=%%B
+
+java -jar target\tracking-1.0.0.jar
+```
+
+Or use PowerShell:
+```powershell
+cd backend-spring
+
+# Read .env and set variables
+Get-Content ..\.env | Where-Object { $_ -notmatch "^#" -and $_ -match "=" } | ForEach-Object {
+    $parts = $_ -split "=", 2
+    [Environment]::SetEnvironmentVariable($parts[0].Trim(), $parts[1].Trim(), "Process")
+}
+
+java -jar target\tracking-1.0.0.jar
 ```
 
 **Expected output:**
@@ -33,69 +156,83 @@ Swagger UI → http://localhost:8080/swagger-ui.html
 
 ---
 
-### Step 2 — Start Frontend (React/Vite)
+## 5. Start Python AI Service *(optional)*
+
+The backend falls back to rule-based scoring automatically if this service is down.
+
+### macOS / Linux
+
+```bash
+cd ..   # back to GPS_Tracking root
+bash start-ai-service.sh
+```
+
+### Windows (Command Prompt)
+
+```cmd
+cd ..   # back to GPS_Tracking root
+start-ai-service.bat
+```
+
+Or manually:
+```cmd
+cd ai-service
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+AI Service → http://localhost:8000  
+Health check → http://localhost:8000/health
+
+---
+
+## 6. Start React Frontend
 
 ```bash
 cd frontend
+
+# First time only — install dependencies
+npm install
+
+# Start development server
 npm run dev
 ```
+
+**Same command on macOS, Linux, and Windows.**
 
 Frontend → http://localhost:5173
 
 ---
 
-### Step 3 — Start Python AI Service *(optional)*
+## All 3 Services Running ✅
 
-```bash
-bash start-ai-service.sh
-```
+| Service | URL | Terminal |
+|---------|-----|---------|
+| React Frontend | http://localhost:5173 | Terminal 1 |
+| Spring Boot Backend | http://localhost:8080 | Terminal 2 |
+| Python AI Service | http://localhost:8000 | Terminal 3 (optional) |
 
-AI Service → http://localhost:8000  
-*(If not running, backend automatically uses rule-based safety scoring)*
-
----
-
-## First Time Setup
-
-### 1. Database (one-time)
-
-```bash
-# macOS
-brew services start postgresql@17
-psql postgres -c "CREATE DATABASE gps_tracking;"
-psql gps_tracking -c "CREATE EXTENSION IF NOT EXISTS postgis;"
-
-# WSL2
-sudo service postgresql start
-sudo -u postgres psql -c "CREATE DATABASE gps_tracking;"
-sudo -u postgres psql -d gps_tracking -c "CREATE EXTENSION IF NOT EXISTS postgis;"
-```
-
-### 2. Seed Data (one-time)
-
-```bash
-psql -d gps_tracking -f data/seed.sql
-```
-
-Loads: **17 drivers · 20 vehicles · 9,082 trips · 11,089 alerts · 343 cost records · 82 maintenance records**
-
-### 3. Frontend Dependencies (one-time)
-
-```bash
-cd frontend && npm install
-```
+Open **http://localhost:5173** in your browser.
 
 ---
 
-## What's Running Where
+## Quick Health Checks
 
-| Service | URL | Port |
-|---------|-----|------|
-| React Frontend | http://localhost:5173 | 5173 |
-| Spring Boot Backend | http://localhost:8080 | 8080 |
-| Swagger API Docs | http://localhost:8080/swagger-ui.html | 8080 |
-| Python AI Service | http://localhost:8000 | 8000 |
-| PostgreSQL | localhost | 5432 |
+```bash
+# Backend responding?
+curl http://localhost:8080/api/drivers
+
+# Driver ranking working?
+curl http://localhost:8080/api/drivers/ranking
+
+# AI service up?
+curl http://localhost:8000/health
+
+# Database has data?
+psql -d gps_tracking -c "SELECT COUNT(*) FROM trips;"
+```
 
 ---
 
@@ -109,50 +246,57 @@ cd frontend && npm install
 | Trips | http://localhost:5173/trips |
 | Alerts | http://localhost:5173/alerts |
 | Reports (PDF) | http://localhost:5173/reports |
-| Maintenance | http://localhost:5173/maintenance |
-| Costs | http://localhost:5173/costs |
-| Sensor Data | http://localhost:5173/sensors |
 | Settings | http://localhost:5173/settings |
 
-**Chatbot:** 💬 button (bottom-right on all pages)
+**Chatbot:** 💬 button in the bottom-right corner of every page.
 
 ---
 
-## Quick Checks
+## Troubleshooting
 
-```bash
-# Is backend up?
-curl -s http://localhost:8080/api/drivers | python3 -m json.tool | head -10
-
-# Driver ranking (real scores)?
-curl -s http://localhost:8080/api/drivers/ranking | python3 -c \
-  "import json,sys; d=json.load(sys.stdin); [print(f'#{r[\"rank\"]} {r[\"driverName\"]} = {r[\"safetyScore\"]}') for r in (d.get('data') or [])[:5]]"
-
-# Generate a PDF report?
-curl -s -X POST http://localhost:8080/api/reports/driver/1/monthly \
-  -H "Content-Type: application/json" \
-  -d '{"year":2026,"month":8}' | python3 -m json.tool
-
-# AI service health?
-curl -s http://localhost:8000/health
-
-# DB row counts?
-psql -d gps_tracking -c "SELECT
-  (SELECT COUNT(*) FROM drivers) AS drivers,
-  (SELECT COUNT(*) FROM vehicles) AS vehicles,
-  (SELECT COUNT(*) FROM trips) AS trips,
-  (SELECT COUNT(*) FROM alerts) AS alerts;"
-```
+| Problem | Fix |
+|---------|-----|
+| `Port 8080 already in use` | `lsof -ti:8080 \| xargs kill -9` (macOS/Linux) or `netstat -ano \| findstr 8080` then `taskkill /PID <pid> /F` (Windows) |
+| `Port 5173 already in use` | `lsof -ti:5173 \| xargs kill -9` (macOS/Linux) |
+| `Connection refused: 8080` | Backend not started yet |
+| Flyway migration error | Check `.env` DB credentials; ensure PostgreSQL is running |
+| `PostGIS extension not found` | Run `CREATE EXTENSION postgis;` in the `gps_tracking` DB |
+| PDF download 404 | Backend must be running; `reports/generated/` is created automatically |
+| Ranking shows 0 drivers | Load seed data: `psql -d gps_tracking -f data/seed.sql` |
+| AI service unavailable | Normal — system falls back to rule-based scoring automatically |
 
 ---
 
-## Kill All Services
+## Technology Stack
 
-```bash
-lsof -ti:8080 | xargs kill -9 2>/dev/null   # Backend
-lsof -ti:5173 | xargs kill -9 2>/dev/null   # Frontend
-lsof -ti:8000 | xargs kill -9 2>/dev/null   # AI Service
-```
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19, Vite 8, Bootstrap 5, Axios, Lucide React |
+| Backend | Java 17, Spring Boot 3.2.5, Spring Data JPA, Flyway |
+| Database | PostgreSQL 17 + PostGIS |
+| AI/ML Service | Python 3.11+, Flask 3 |
+| PDF Reports | iText 7 (server-side) |
+| Notifications | SMTP Email + MSG91 SMS |
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DB_HOST` | ✅ | PostgreSQL host (usually `localhost`) |
+| `DB_PORT` | ✅ | PostgreSQL port (default `5432`) |
+| `DB_NAME` | ✅ | Database name (use `gps_tracking`) |
+| `DB_USERNAME` | ✅ | PostgreSQL username |
+| `DB_PASSWORD` | ✅ | PostgreSQL password |
+| `SERVER_PORT` | ✅ | Spring Boot port (default `8080`) |
+| `EMAIL_USER` | ⬜ Optional | Gmail address for alert emails |
+| `EMAIL_PASSWORD` | ⬜ Optional | Gmail App Password |
+| `MSG91_AUTH_KEY` | ⬜ Optional | MSG91 auth key for SMS |
+| `PYTHON_AI_SERVICE_URL` | ⬜ Optional | AI service URL (default `http://localhost:8000`) |
+| `VITE_API_URL` | ⬜ Optional | Backend URL for frontend (default `http://localhost:8080`) |
+
+> **Security:** Never commit `.env` to Git. It is gitignored. Only commit `.env.example`.
 
 ---
 
@@ -160,33 +304,9 @@ lsof -ti:8000 | xargs kill -9 2>/dev/null   # AI Service
 
 | Version | Description |
 |---------|-------------|
-| V1 | Core fleet tables (drivers, vehicles, trips, alerts, telemetry) |
-| V2 | Raw sensor tables (acceleration, GPS/AQI, camera, audio, ultrasonic) |
-| V3 | Performance indexes (driver_id, vehicle_id, occurred_at, PostGIS spatial) |
-| V4 | Seed reference data (system config) |
-| V5 | Add driver_daily_stats.created_at column |
-| V6 | Increase alerts.reference to VARCHAR(200) |
-
----
-
-## Environment Variables (`.env`)
-
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=gps_tracking
-DB_USERNAME=postgres
-DB_PASSWORD=your_password
-SERVER_PORT=8080
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USER=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-FLEET_EMAIL=fleet@trackfleet.com
-MANAGER_EMAIL=manager@trackfleet.com
-MSG91_AUTH_KEY=your_key
-FLEET_PHONE=919876543200
-MANAGER_PHONE=919876543201
-PYTHON_AI_SERVICE_URL=http://localhost:8000
-VITE_API_URL=http://localhost:8080
-```
+| V1 | Core fleet tables: drivers, vehicles, trips, alerts, telemetry |
+| V2 | Sensor tables: acceleration, GPS/AQI, camera, audio, ultrasonic |
+| V3 | Performance indexes + PostGIS spatial index |
+| V4 | Reference seed data (system config) |
+| V5 | Add `driver_daily_stats.created_at` column |
+| V6 | Increase `alerts.reference` to VARCHAR(200) |

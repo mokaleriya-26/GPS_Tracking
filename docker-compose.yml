@@ -3,10 +3,10 @@ version: '3.9'
 services:
 
   # ============================================================
-  # PostgreSQL 15 with PostGIS extension
+  # PostgreSQL 17 with PostGIS extension (matches local dev version)
   # ============================================================
   postgres:
-    image: postgis/postgis:15-3.4
+    image: postgis/postgis:17-3.5
     container_name: gps_postgres
     restart: unless-stopped
     environment:
