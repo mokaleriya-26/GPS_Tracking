@@ -1,25 +1,159 @@
-body {
+/* ============================================================
+   TrackFleet Global Styles
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  padding: 0;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f8f9fa;
+  background-color: #f8fafc;
 }
 
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
+/* ============================================================
+   LAYOUT — Sidebar + Main Content
+   The sidebar is an in-flow flex child (not fixed/absolute).
+   The main area must use min-width:0 so it can shrink below
+   its natural content width and never overflow the viewport.
+   ============================================================ */
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* Main content area — CRITICAL: min-width:0 allows flex child to shrink */
 .app-main {
-  margin-left: 250px;
+  flex: 1 1 0;
+  min-width: 0;          /* ← allows shrink past content size */
+  overflow-x: hidden;    /* ← clips any child that still overflows */
+  overflow-y: auto;
 }
 
-@media (max-width: 767.98px) {
-  .app-main {
-    margin-left: 0 !important;
+/* Inner container — never wider than the viewport */
+.app-main > .container-fluid {
+  width: 100%;
+  max-width: 100%;
+  padding-left: 20px;
+  padding-right: 20px;
+}
+
+/* ============================================================
+   TABLES — horizontal scroll only when content truly requires it
+   ============================================================ */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  table-layout: auto;
+}
+
+/* Prevent table cells from forcing the table wider than its container */
+td, th {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  max-width: 0;          /* trick: forces cells to honour table width */
+}
+
+/* ============================================================
+   CARDS — always fill container, never overflow
+   ============================================================ */
+.card {
+  min-width: 0;
+}
+
+/* ============================================================
+   TEXT TRUNCATION UTILITY
+   ============================================================ */
+.text-truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================================
+   RESPONSIVE BREAKPOINTS
+   ============================================================ */
+@media (max-width: 1199.98px) {
+  .app-main > .container-fluid {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 
+@media (max-width: 767.98px) {
+  .app-main > .container-fluid {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+/* ============================================================
+   SPINNER ANIMATION (used in Reports + Chatbot)
+   ============================================================ */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============================================================
+   CHATBOT — keep inside viewport on all screen sizes
+   ============================================================ */
+.chatbot-window {
+  position: fixed;
+  bottom: 88px;
+  right: 20px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 120px);
+  z-index: 1050;
+  border-radius: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.chatbot-trigger {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1050;
+}
+
+@media (max-width: 480px) {
+  .chatbot-window {
+    right: 8px;
+    bottom: 80px;
+    width: calc(100vw - 16px);
+  }
+  .chatbot-trigger {
+    right: 12px;
+    bottom: 16px;
+  }
+}

@@ -30,3 +30,20 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Java / Maven
+target/
+*.class
+*.jar
+*.war
+
+# Spring Boot generated reports
+reports/generated/
+
+# Logs
+*.log
+/tmp/*.log
+
+# Frontend production build
+frontend/dist/
+frontend/.vite/

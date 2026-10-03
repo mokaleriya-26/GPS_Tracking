@@ -1,0 +1,117 @@
+version: '3.9'
+
+services:
+
+  # ============================================================
+  # PostgreSQL 15 with PostGIS extension
+  # ============================================================
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: gps_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-gps_tracking}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-gps_tracking}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fleet_network
+
+  # ============================================================
+  # Spring Boot Backend (optional — can run locally with Maven)
+  # Uncomment to run inside Docker
+  # ============================================================
+  # backend:
+  #   build:
+  #     context: ./backend-spring
+  #     dockerfile: Dockerfile
+  #   container_name: gps_backend
+  #   restart: unless-stopped
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     ai-service:
+  #       condition: service_healthy
+  #   environment:
+  #     DB_HOST: postgres
+  #     DB_PORT: 5432
+  #     DB_NAME: ${DB_NAME:-gps_tracking}
+  #     DB_USERNAME: ${DB_USERNAME:-postgres}
+  #     DB_PASSWORD: ${DB_PASSWORD:-password}
+  #     SERVER_PORT: 8080
+  #     PYTHON_AI_SERVICE_URL: http://ai-service:8000
+  #     EMAIL_HOST: ${EMAIL_HOST:-smtp.gmail.com}
+  #     EMAIL_PORT: ${EMAIL_PORT:-587}
+  #     EMAIL_USER: ${EMAIL_USER:-}
+  #     EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+  #     FLEET_EMAIL: ${FLEET_EMAIL:-}
+  #     MANAGER_EMAIL: ${MANAGER_EMAIL:-}
+  #     MSG91_AUTH_KEY: ${MSG91_AUTH_KEY:-}
+  #     MSG91_SMS_TEMPLATE_ID: ${MSG91_SMS_TEMPLATE_ID:-}
+  #     MSG91_SENDER_ID: ${MSG91_SENDER_ID:-}
+  #     FLEET_PHONE: ${FLEET_PHONE:-}
+  #     MANAGER_PHONE: ${MANAGER_PHONE:-}
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - ./reports:/app/reports
+  #   networks:
+  #     - fleet_network
+
+  # ============================================================
+  # Python AI/ML Service (optional — can run locally)
+  # Uncomment to run inside Docker
+  # ============================================================
+  # ai-service:
+  #   build:
+  #     context: ./ai-service
+  #     dockerfile: Dockerfile
+  #   container_name: gps_ai_service
+  #   restart: unless-stopped
+  #   environment:
+  #     PORT: 8000
+  #   ports:
+  #     - "8000:8000"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - fleet_network
+
+  # ============================================================
+  # React Frontend (optional — can run locally with npm)
+  # Uncomment to run inside Docker
+  # ============================================================
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: gps_frontend
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - backend
+  #   environment:
+  #     VITE_API_URL: http://backend:8080
+  #   ports:
+  #     - "5173:5173"
+  #   networks:
+  #     - fleet_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  fleet_network:
+    driver: bridge

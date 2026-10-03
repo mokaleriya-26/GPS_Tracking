@@ -1,0 +1,2 @@
+ALTER TABLE alerts
+ALTER COLUMN reference TYPE VARCHAR(200);
