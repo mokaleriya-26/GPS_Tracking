@@ -6,9 +6,9 @@ const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
 const WELCOME = {
   role: 'bot',
-  text: `👋 **Hi! I'm your Fleet Assistant.**\n\nI have live access to your fleet database — vehicles, drivers, trips, alerts and PDF reports.\n\nTry asking:\n• *"Give me today's fleet summary"*\n• *"Which vehicle has the most alerts?"*\n• *"Who is the safest driver?"*\n• *"Tell me about VH003"*\n• *"How many trips did DRV001 complete?"*\n• *"Generate fleet report for September 2026"*`,
+  text: `👋 **Hi! I'm your Fleet Assistant.**\n\nI have live access to your fleet database — vehicles, drivers, trips, alerts and PDF reports.\n\nTry asking:\n• *"Give me recommendation of drivers"*\n• *"Which vehicle has the most alerts?"*\n• *"Who is the safest driver?"*\n• *"Who should I choose for a long trip?"*\n• *"Tell me about VH003"*\n• *"Generate fleet report for September 2026"*`,
   ts: new Date(),
-  quickActions: ['📊 Fleet Summary', '🏆 Safest Driver', '🚗 VH001 Details', '⚠️ Top Alerts']
+  quickActions: ['🌟 Recommend Drivers', '📊 Fleet Summary', '🏆 Safest Driver', '🚗 VH001 Details']
 };
 
 /** Render plain text line with bold/italic/table-row support */

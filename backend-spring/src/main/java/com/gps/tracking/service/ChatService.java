@@ -131,8 +131,10 @@ public class ChatService {
         // =========================================================
         // 3. VEHICLE ALERT ANALYSIS (Most alerts / issues)
         // =========================================================
-        if (normalized.matches(".*(which vehicle|what vehicle|vehicles with|top vehicle|vehicle.*(most|highest|worst|problem|trouble|highest alert)|needs attention).*")
-                || normalized.matches(".*(most alerts|most overspeed|highest overspeed|highest alert|most problem).*")) {
+        // Only vehicle-focused queries; do NOT capture driver queries like "Which driver has the most alerts?"
+        if (!normalized.contains("driver") && !normalized.contains("drv") &&
+            (normalized.matches(".*(which vehicle|what vehicle|vehicles with|top vehicle|vehicle.*(most|highest|worst|problem|trouble|highest alert)|needs attention).*")
+                || normalized.matches(".*(most alerts|most overspeed|highest overspeed|highest alert|most problem).*"))) {
             return handleVehicleAlertAnalysis(sessionId, normalized, ctx);
         }
 
@@ -145,9 +147,19 @@ public class ChatService {
         }
 
         // =========================================================
-        // 5. DRIVER RANKING & SAFETY LEADERS
+        // 5a. DRIVER RECOMMENDATION (natural-language recommendations)
         // =========================================================
-        if (normalized.matches(".*(trustworthy|best driver|top driver|safest|safety ranking|driver rank|rank driver|who is the safest|safest driver).*")) {
+        // Detect recommendation intent: recommend/suggest/who should I/which driver would you trust, etc.
+        // Must NOT collide with VEHICLE_ALERT_ANALYSIS (already checked above) or simple ranking (below).
+        if (isDriverRecommendationIntent(normalized)) {
+            return handleDriverRecommendation(sessionId, normalized, ctx);
+        }
+
+        // =========================================================
+        // 5b. DRIVER RANKING & SAFETY LEADERS / DRIVER ALERTS
+        // =========================================================
+        if (normalized.matches(".*(trustworthy|best driver|top driver|safest|safety ranking|driver rank|rank driver|who is the safest|safest driver).*")
+                || (normalized.contains("driver") && normalized.matches(".*(most alert|highest alert|most problem|most overspeed|worst).*"))) {
             return handleDriverRanking(sessionId, normalized, ctx);
         }
 
@@ -223,6 +235,8 @@ public class ChatService {
             "• *\"Which vehicle has the most alerts?\"*\n" +
             "• *\"Tell me about VH003\"*\n" +
             "• *\"Who is the safest driver?\"*\n" +
+            "• *\"Recommend 3 drivers for an important trip\"*\n" +
+            "• *\"Which driver is best for a long-distance route?\"*\n" +
             "• *\"How many trips did DRV001 complete?\"*\n" +
             "• *\"Show overspeed alerts\"*\n" +
             "• *\"Generate fleet report for September 2026\"*";
@@ -231,7 +245,7 @@ public class ChatService {
             .sessionId(sessionId)
             .intent("GREETING")
             .message(msg)
-            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🚗 Vehicles", "⚠️ Top Alerts", "📄 Reports"))
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers", "🚗 Vehicles", "⚠️ Top Alerts", "📄 Reports"))
             .build();
     }
 
@@ -477,6 +491,13 @@ public class ChatService {
 
         List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
 
+        boolean sortByMostAlerts = normalized.matches(".*(most alert|highest alert|most problem|most overspeed).*");
+        if (sortByMostAlerts) {
+            rankings = rankings.stream()
+                .sorted(Comparator.comparingLong((DriverRankingDTO r) -> r.getTotalAlerts() != null ? r.getTotalAlerts() : 0).reversed())
+                .collect(Collectors.toList());
+        }
+
         int limit = 5;
         if (normalized.contains("top 10")) limit = 10;
         else if (normalized.contains("top 3")) limit = 3;
@@ -493,13 +514,18 @@ public class ChatService {
         }
 
         StringBuilder table = new StringBuilder();
-        table.append(String.format("🏆 **Top Drivers by Safety Score (%s)**\n\n", periodLabel));
+        if (sortByMostAlerts) {
+            table.append(String.format("⚠️ **Drivers with the Most Alerts (%s)**\n\n", periodLabel));
+        } else {
+            table.append(String.format("🏆 **Top Drivers by Safety Score (%s)**\n\n", periodLabel));
+        }
         table.append("| Rank | Driver | Safety Score | Trips | Distance | Alerts | Overspeed | Harsh Braking |\n");
         table.append("|:---:|:---|:---:|---:|---:|---:|---:|---:|\n");
 
+        int displayRank = 1;
         for (DriverRankingDTO r : topN) {
             table.append(String.format("| %d | **%s** (%s) | **%.1f** | %,d | %,.1f km | %,d | %,d | %,d |\n",
-                r.getRank(), r.getDriverName(), r.getDriverCode(),
+                displayRank++, r.getDriverName(), r.getDriverCode(),
                 r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0,
                 r.getTripCount() != null ? r.getTripCount() : 0,
                 r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0,
@@ -509,21 +535,277 @@ public class ChatService {
         }
 
         DriverRankingDTO best = topN.get(0);
-        table.append(String.format("\n🌟 **%s** is currently the safest driver with a score of **%.1f/100** across %,d trips.",
-            best.getDriverName(), best.getSafetyScore(), best.getTripCount()));
+        if (sortByMostAlerts) {
+            table.append(String.format("\n⚠️ **%s** has accumulated the most alerts (%d alerts across %,d trips). Consider reviewing driving patterns or safety coaching.",
+                best.getDriverName(), best.getTotalAlerts() != null ? best.getTotalAlerts() : 0, best.getTripCount() != null ? best.getTripCount() : 0));
+        } else {
+            table.append(String.format("\n🌟 **%s** is currently the safest driver with a score of **%.1f/100** across %,d trips.",
+                best.getDriverName(), best.getSafetyScore(), best.getTripCount()));
+        }
 
         ctx.put("last_subject", "DRIVER");
         ctx.put("last_driver_id", String.valueOf(best.getDriverId()));
         ctx.put("last_driver_name", best.getDriverName());
         ctx.put("last_driver_code", best.getDriverCode());
 
+        List<String> qa = new ArrayList<>();
+        qa.add("Show details for " + best.getDriverName());
+        qa.add("📊 Fleet Summary");
+        qa.add("🌟 Recommend Drivers");
+
         return ChatResponseDTO.builder()
             .sessionId(sessionId)
             .intent("DRIVER_RANKING")
             .message(table.toString())
             .data(topN)
-            .quickActions(List.of("Show details for " + best.getDriverName(), "📊 Fleet Summary", "📄 Generate Driver Report"))
+            .quickActions(qa)
             .build();
+    }
+
+    // =========================================================================
+    // DRIVER RECOMMENDATION INTENT DETECTION HELPER
+    // =========================================================================
+
+    /**
+     * Returns true when the user's message is asking for driver recommendations,
+     * suggestions, or "who should I choose/assign" type questions.
+     * Deliberately narrow enough NOT to fire on vehicle-focused or alert-only queries.
+     */
+    private boolean isDriverRecommendationIntent(String n) {
+        // Exclude queries clearly asking about vehicles
+        if (n.contains("vehicle") || n.contains("truck") || n.contains("car") || n.matches(".*vh\\d+.*")) {
+            return false;
+        }
+
+        // Strong direct signals: recommend / suggestion
+        if (n.matches(".*(recommend|recommendation|suggest|suggestion).*(driver|drv|who)?.*")) return true;
+        if (n.matches(".*(driver|drv|who).*(recommend|recommendation|suggest|suggestion).*")) return true;
+
+        // "give me / show me / list ... drivers"
+        if (n.matches(".*(give me|show me|list|tell me|get).*(recommend|top driver|best driver|good driver|reliable driver|safest driver|leading driver).*")) return true;
+        if (n.matches(".*(give me|show me|list|get).*(\\d+).*(driver|recommend).*")) return true;
+        if (n.matches(".*(top|best|recommend)\\s*\\d+\\s*drivers?.*")) return true;
+
+        // "who / which driver should I choose / assign / pick / select / trust"
+        if (n.matches(".*(who|which driver).*(should i|would you|can i|do you|to).*(choose|assign|pick|select|trust|recommend|use|take).*")) return true;
+        if (n.matches(".*who\\s+should\\s+i\\s+(choose|assign|pick|select|trust|recommend|use).*")) return true;
+
+        // "who is / which driver is best for long trip / route / distance"
+        if (n.matches(".*(who|which driver|best driver).*(best for|suited for|good for|ideal for|great for).*(long|trip|distance|route|important|assignment).*")) return true;
+        if (n.matches(".*(who|which driver).*(for a long|for long|on long).*(trip|drive|route).*")) return true;
+
+        // "who is / which drivers are most reliable / safest / best / top"
+        if (n.matches(".*(who|which driver|which drivers)\\s+(are|is|have been)\\s+(the\\s+)?(top|most reliable|safest|best|good|trustworthy|most experienced).*")) return true;
+        if (n.matches(".*(who|which driver).*(most reliable|most trustworthy|best performing|best performance|most experienced).*")) return true;
+        if (n.matches(".*who\\s+(are|is)\\s+(the\\s+)?best\\s+(drivers?|in the fleet).*")) return true;
+        if (n.matches(".*who\\s+(are|is)\\s+(the\\s+)?safest\\s+drivers?.*")) return true;
+        if (n.matches(".*who\\s+is\\s+(the\\s+)?safest\\s+driver.*")) return true;
+        if (n.matches(".*which\\s+drivers?\\s+(are|is)\\s+(the\\s+)?(top|safest|best|good|reliable|most reliable).*")) return true;
+        if (n.matches(".*(which drivers? (have|has|had) (the )?best (performance|record|safety|score|results?)).*")) return true;
+        if (n.matches(".*(which drivers? (have|has) performed (the )?best).*")) return true;
+        if (n.matches(".*(top performing|best performing)\\s+drivers?.*")) return true;
+        if (n.matches(".*who\\s+are\\s+my\\s+top.*")) return true;
+
+        // "who / which driver has the most trips / fewest alerts / highest score / best safety record"
+        if (n.matches(".*(who|which driver|which drivers)\\s+(has|have|got|with)\\s+(the\\s+)?(most trips?|highest trips?|fewest alerts?|least alerts?|lowest alerts?|best safety record|highest safety score).*")) return true;
+        if (n.matches(".*(driver|drivers).*(most trips?|highest trips?|fewest alerts?|least alerts?|safest record).*")) return true;
+        if (n.matches(".*who\\s+has\\s+(the\\s+)?(most trips?|fewest alerts?|best safety record|highest safety score).*")) return true;
+
+        // "recommend a driver", "recommend some drivers", "best overall driver"
+        if (n.matches(".*(recommend a driver|recommend some driver|recommend the best driver|recommend good driver|recommend top driver).*")) return true;
+        if (n.matches(".*(best overall driver|top performing driver|top driver.*(recommend|suggest)|recommend.*top driver).*")) return true;
+
+        // UI quick action button strings
+        if (n.contains("recommend driver") || n.contains("recommend drivers")) return true;
+        if (n.matches(".*(best overall|fewest alert|best for long trip|long trip|long-distance trip).*")) return true;
+        if (n.contains("\ud83c\udf1f") || n.contains("\ud83c\udfc6") || n.contains("\ud83d\udee3") || n.contains("\ud83d\udd14")) return true;
+
+        return false;
+    }
+
+    // =========================================================================
+    // DRIVER RECOMMENDATION HANDLER
+    // =========================================================================
+
+    /** DRIVER_RECOMMENDATION intent handler */
+    private ChatResponseDTO handleDriverRecommendation(String sessionId, String normalized, Map<String, String> ctx) {
+        // Determine how many to recommend
+        int limit = extractRecommendationCount(normalized);
+
+        // Determine sub-criteria from message
+        String criteria = detectRecommendationCriteria(normalized);
+
+        // Fetch all-time rankings (use full date range for max data coverage)
+        LocalDate from = LocalDate.of(2020, 1, 1);
+        LocalDate to = LocalDate.now();
+        List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+
+        if (rankings.isEmpty()) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("DRIVER_RECOMMENDATION")
+                .message("I couldn't find any driver data to make a recommendation. Please ensure the fleet database has trip and alert history.")
+                .quickActions(List.of("📊 Fleet Summary", "🏆 Driver Rankings"))
+                .build();
+        }
+
+        // Sort by the appropriate sub-criteria
+        List<DriverRankingDTO> sorted = sortByRecommendationCriteria(rankings, criteria);
+
+        // Only recommend drivers with meaningful data (at least 10 trips)
+        List<DriverRankingDTO> qualified = sorted.stream()
+            .filter(r -> r.getTripCount() != null && r.getTripCount() >= 10)
+            .collect(Collectors.toList());
+
+        // If filter is too strict, relax it
+        if (qualified.isEmpty()) qualified = sorted;
+
+        List<DriverRankingDTO> topN = qualified.stream().limit(limit).collect(Collectors.toList());
+
+        StringBuilder sb = new StringBuilder();
+        String criteriaLabel = getCriteriaLabel(criteria);
+        sb.append(String.format("🌟 **Driver Recommendation (%s)**\n\n", criteriaLabel));
+        sb.append("Based on actual fleet data, here are my recommendations:\n\n");
+
+        int displayRank = 1;
+        for (DriverRankingDTO r : topN) {
+            double score = r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0;
+            long trips = r.getTripCount() != null ? r.getTripCount() : 0;
+            double dist = r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0;
+            long alerts = r.getTotalAlerts() != null ? r.getTotalAlerts() : 0;
+            long overspeed = r.getOverspeedEvents() != null ? r.getOverspeedEvents() : 0;
+            long harshBraking = r.getHarshBrakingEvents() != null ? r.getHarshBrakingEvents() : 0;
+
+            String recommendation = buildRecommendationNote(r, criteria, displayRank);
+
+            sb.append(String.format("**%d. %s (%s)**\n", displayRank, r.getDriverName(), r.getDriverCode()));
+            sb.append(String.format("   • Safety Score: **%.1f / 100**\n", score));
+            sb.append(String.format("   • Trips: **%,d** | Distance: **%,.1f km**\n", trips, dist));
+            sb.append(String.format("   • Overspeed Alerts: **%,d** | Harsh Braking: **%,d** | Total Alerts: **%,d**\n", overspeed, harshBraking, alerts));
+            sb.append(String.format("   • ✅ *%s*\n\n", recommendation));
+            displayRank++;
+        }
+
+        // Overall summary
+        DriverRankingDTO best = topN.get(0);
+        sb.append(String.format(
+            "🏆 **My top pick: %s (%s)** — %s",
+            best.getDriverName(), best.getDriverCode(),
+            buildRecommendationNote(best, criteria, 1)));
+
+        ctx.put("last_subject", "DRIVER");
+        ctx.put("last_driver_id", String.valueOf(best.getDriverId()));
+        ctx.put("last_driver_name", best.getDriverName());
+        ctx.put("last_driver_code", best.getDriverCode());
+
+        List<String> actions = new ArrayList<>();
+        actions.add("Tell me more about " + best.getDriverName());
+        actions.add("🏆 Best Overall");
+        actions.add("🛡️ Safest Driver");
+        actions.add("🛣️ Best for Long Trips");
+        actions.add("🔔 Fewest Alerts");
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("DRIVER_RECOMMENDATION")
+            .message(sb.toString())
+            .data(topN)
+            .quickActions(actions)
+            .build();
+    }
+
+    /** Extract the requested count from "give me 3 drivers", "top 5", etc. */
+    private int extractRecommendationCount(String n) {
+        // Match "top 3", "3 drivers", "recommend 5", etc.
+        Matcher m = Pattern.compile("\\b(\\d{1,2})\\s*(?:drivers?|recommended|recommendations?)\\b|\\b(?:top|best|recommend|show me|give me)\\s*(\\d{1,2})\\b").matcher(n);
+        if (m.find()) {
+            String val = m.group(1) != null ? m.group(1) : m.group(2);
+            if (val != null) {
+                int count = Integer.parseInt(val);
+                if (count >= 1 && count <= 17) return count;
+            }
+        }
+        // Default: if singular ("recommend a driver", "who should I choose", "safest driver") return 1; else 3
+        if (n.matches(".*(\\ba driver\\b|\\bone driver\\b|\\bwho should i\\b|\\bwho would you\\b|\\bwho is the safest\\b|\\bwho is the best\\b|\\bwhich driver has\\b|\\bwho has the\\b).*")) return 1;
+        return 3;
+    }
+
+    /** Detect sub-criteria from the user's request */
+    private String detectRecommendationCriteria(String n) {
+        if (n.matches(".*(long.?trip|long.?distance|long.?route|high.?distance|most.?km|experienced).*")) return "LONG_TRIP";
+        if (n.matches(".*(fewest alert|least alert|low alert|minimum alert|no alert|lowest alert).*")) return "FEWEST_ALERTS";
+        if (n.matches(".*(most trips?|highest trips?|trip count|most experience|veteran).*")) return "MOST_TRIPS";
+        if (n.matches(".*(safest|safety score|safe driver|low speed|safe record|safety record).*")) return "SAFETY";
+        // default: overall composite score
+        return "OVERALL";
+    }
+
+    /** Sort rankings by the requested criteria */
+    private List<DriverRankingDTO> sortByRecommendationCriteria(List<DriverRankingDTO> rankings, String criteria) {
+        switch (criteria) {
+            case "LONG_TRIP":
+                // Best for long trips: high distance AND good safety score
+                return rankings.stream()
+                    .sorted(Comparator
+                        .comparingDouble((DriverRankingDTO r) -> r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0)
+                        .reversed()
+                        .thenComparingDouble(r -> r.getSafetyScore() != null ? -r.getSafetyScore().doubleValue() : 0.0))
+                    .collect(Collectors.toList());
+            case "FEWEST_ALERTS":
+                // Fewest total alerts (normalized by trips to avoid low-trip bias)
+                return rankings.stream()
+                    .filter(r -> r.getTripCount() != null && r.getTripCount() > 0)
+                    .sorted(Comparator.comparingDouble((DriverRankingDTO r) -> {
+                        double alerts = r.getTotalAlerts() != null ? r.getTotalAlerts() : 0;
+                        double trips = r.getTripCount() != null && r.getTripCount() > 0 ? r.getTripCount() : 1;
+                        return alerts / trips; // alerts per trip (lower = better)
+                    }))
+                    .collect(Collectors.toList());
+            case "MOST_TRIPS":
+                return rankings.stream()
+                    .sorted(Comparator.comparingInt((DriverRankingDTO r) -> r.getTripCount() != null ? r.getTripCount() : 0).reversed())
+                    .collect(Collectors.toList());
+            case "SAFETY":
+                return rankings.stream()
+                    .sorted(Comparator.comparingDouble((DriverRankingDTO r) -> r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0).reversed())
+                    .collect(Collectors.toList());
+            default: // OVERALL: composite (safety score is already composite in the ranking formula)
+                return rankings; // already sorted by safety score (composite formula) from getDriverRanking
+        }
+    }
+
+    /** Human-readable criteria label */
+    private String getCriteriaLabel(String criteria) {
+        switch (criteria) {
+            case "LONG_TRIP": return "Best for Long-Distance Trips";
+            case "FEWEST_ALERTS": return "Fewest Alerts (Safest Record)";
+            case "MOST_TRIPS": return "Most Experienced (Highest Trip Count)";
+            case "SAFETY": return "Best Safety Score";
+            default: return "Best Overall Performance";
+        }
+    }
+
+    /** Build a short recommendation note for a driver */
+    private String buildRecommendationNote(DriverRankingDTO r, String criteria, int rank) {
+        double score = r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0;
+        long trips = r.getTripCount() != null ? r.getTripCount() : 0;
+        double dist = r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0;
+        long alerts = r.getTotalAlerts() != null ? r.getTotalAlerts() : 0;
+
+        switch (criteria) {
+            case "LONG_TRIP":
+                return String.format("Highest fleet distance (%.0f km) with a %.1f safety score — ideal for long routes.", dist, score);
+            case "FEWEST_ALERTS":
+                double apr = trips > 0 ? (double) alerts / trips : 0;
+                return String.format("Only %.2f alerts per trip over %,d trips — excellent safety discipline.", apr, trips);
+            case "MOST_TRIPS":
+                return String.format("%,d completed trips with %.1f safety score — highly experienced.", trips, score);
+            case "SAFETY":
+                return String.format("Safety score %.1f/100 across %,d trips — top safety performer.", score, trips);
+            default:
+                if (rank == 1) return String.format("Composite safety score %.1f/100 across %,d trips and %.0f km — overall top pick.", score, trips, dist);
+                return String.format("Safety score %.1f/100 | %,d trips | %.0f km driven.", score, trips, dist);
+        }
     }
 
     /** 7. DRIVER STATS */
@@ -935,7 +1217,8 @@ public class ChatService {
         String msg = "I'm not quite sure how to answer that, but I can help you with:\n\n" +
             "• **Fleet Overview**: *\"Give me today's fleet summary\"*\n" +
             "• **Vehicles**: *\"Tell me about VH003\"* or *\"Which vehicle has the most alerts?\"*\n" +
-            "• **Drivers**: *\"Who is the safest driver?\"* or *\"How many trips did DRV001 complete?\"*\n" +
+            "• **Drivers**: *\"Who is the safest driver?\"* or *\"Recommend 3 drivers\"*\n" +
+            "• **Driver Recommendations**: *\"Which driver is best for a long trip?\"* or *\"Who should I assign?\"*\n" +
             "• **Alerts**: *\"Show overspeed alerts\"* or *\"Any GPS disconnects?\"*\n" +
             "• **Reports**: *\"Generate fleet report for September 2026\"*\n\n" +
             "What would you like to explore?";
@@ -944,7 +1227,7 @@ public class ChatService {
             .sessionId(sessionId)
             .intent("UNKNOWN")
             .message(msg)
-            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🚗 VH003 Details", "⚠️ Top Alerts"))
+            .quickActions(List.of("📊 Fleet Summary", "🌟 Recommend Drivers", "🏆 Safest Driver", "⚠️ Top Alerts", "📄 Reports"))
             .build();
     }
 
