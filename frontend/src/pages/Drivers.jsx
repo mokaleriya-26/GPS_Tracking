@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Users, Search, Shield, TrendingUp, Phone, Award, AlertTriangle, RefreshCw } from 'lucide-react';
 import { getDrivers, getDriverRanking } from '../api/drivers';
 
 export default function Drivers() {
+  const [searchParams] = useSearchParams();
   const [drivers, setDrivers] = useState([]);
   const [ranking, setRanking] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
-  const [tab, setTab] = useState('list'); // 'list' | 'ranking'
+  const [tab, setTab] = useState(() => searchParams.get('tab') === 'ranking' ? 'ranking' : 'list');
 
   useEffect(() => {
     setLoading(true);
@@ -165,23 +167,23 @@ export default function Drivers() {
           </div>
           <div className="card border-0 shadow-sm">
             <div className="table-responsive">
-              <table className="table table-hover mb-0">
+              <table className="table table-hover align-middle mb-0">
                 <thead style={{ background: '#f8fafc' }}>
                   <tr>
-                    <th style={{ width: 60 }}>Rank</th>
-                    <th>Driver</th>
-                    <th>Safety Score</th>
-                    <th>Trips</th>
-                    <th>Distance</th>
-                    <th>Overspeed</th>
-                    <th>Harsh Braking</th>
-                    <th>Alerts</th>
+                    <th style={{ width: 80, minWidth: 80, whiteSpace: 'nowrap' }}>Rank</th>
+                    <th style={{ minWidth: 160 }}>Driver</th>
+                    <th style={{ minWidth: 140, whiteSpace: 'nowrap' }}>Safety Score</th>
+                    <th style={{ minWidth: 80, whiteSpace: 'nowrap' }}>Trips</th>
+                    <th style={{ minWidth: 110, whiteSpace: 'nowrap' }}>Distance</th>
+                    <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>Overspeed</th>
+                    <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>Harsh Braking</th>
+                    <th style={{ minWidth: 80, whiteSpace: 'nowrap' }}>Alerts</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ranking.map((r, i) => (
                     <tr key={r.driverId}>
-                      <td>
+                      <td style={{ width: 80, minWidth: 80, whiteSpace: 'nowrap' }}>
                         <span style={{
                           fontWeight: 700, fontSize: 14,
                           color: i === 0 ? '#d97706' : i === 1 ? '#94a3b8' : i === 2 ? '#b45309' : '#64748b'
@@ -189,11 +191,11 @@ export default function Drivers() {
                           #{r.rank || i + 1}
                         </span>
                       </td>
-                      <td>
+                      <td style={{ minWidth: 160 }}>
                         <div className="fw-semibold">{r.driverName}</div>
                         <div className="text-muted" style={{ fontSize: 11 }}>{r.driverCode}</div>
                       </td>
-                      <td>
+                      <td style={{ minWidth: 140, whiteSpace: 'nowrap' }}>
                         <div className="d-flex align-items-center gap-2">
                           <div style={{ flex: 1, height: 6, background: '#f1f5f9', borderRadius: 3, maxWidth: 80 }}>
                             <div style={{
@@ -206,19 +208,19 @@ export default function Drivers() {
                           </span>
                         </div>
                       </td>
-                      <td>{r.tripCount || 0}</td>
-                      <td>{r.totalDistanceKm?.toFixed ? r.totalDistanceKm.toFixed(0) : r.totalDistanceKm || 0} km</td>
-                      <td>
+                      <td style={{ minWidth: 80, whiteSpace: 'nowrap' }}>{r.tripCount || 0}</td>
+                      <td style={{ minWidth: 110, whiteSpace: 'nowrap' }}>{r.totalDistanceKm?.toFixed ? r.totalDistanceKm.toFixed(0) : r.totalDistanceKm || 0} km</td>
+                      <td style={{ minWidth: 100, whiteSpace: 'nowrap' }}>
                         <span className={`badge ${r.overspeedEvents > 0 ? 'bg-danger' : 'bg-success'}`}>
                           {r.overspeedEvents || 0}
                         </span>
                       </td>
-                      <td>
+                      <td style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
                         <span className={`badge ${r.harshBrakingEvents > 0 ? 'bg-warning text-dark' : 'bg-success'}`}>
                           {r.harshBrakingEvents || 0}
                         </span>
                       </td>
-                      <td>{r.totalAlerts || 0}</td>
+                      <td style={{ minWidth: 80, whiteSpace: 'nowrap' }}>{r.totalAlerts || 0}</td>
                     </tr>
                   ))}
                   {ranking.length === 0 && (

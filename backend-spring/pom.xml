@@ -173,6 +173,7 @@
     </dependencies>
 
     <build>
+        <finalName>tracking-app</finalName>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

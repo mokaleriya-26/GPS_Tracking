@@ -36,4 +36,24 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
     /** Trips that started in the given date range */
     @Query("SELECT t FROM Trip t WHERE t.startTime BETWEEN :from AND :to ORDER BY t.startTime DESC")
     List<Trip> findByStartTimeBetween(LocalDateTime from, LocalDateTime to);
+
+    long countByVehicleId(Long vehicleId);
+
+    @Query("SELECT COUNT(t) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime BETWEEN :from AND :to")
+    long countByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.vehicle.id = :vehicleId")
+    Double sumDistanceByVehicleId(Long vehicleId);
+
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime BETWEEN :from AND :to")
+    Double sumDistanceByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t")
+    Double sumTotalDistance();
+
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
+    Double sumDistanceInDateRange(LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(t) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
+    long countInDateRange(LocalDateTime from, LocalDateTime to);
 }

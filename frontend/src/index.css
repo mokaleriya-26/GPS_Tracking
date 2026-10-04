@@ -69,11 +69,15 @@ table {
   table-layout: auto;
 }
 
-/* Prevent table cells from forcing the table wider than its container */
-td, th {
-  word-break: break-word;
+/* Ensure table headers stay on a single line and never break character-by-character */
+th {
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+td {
+  vertical-align: middle;
   overflow-wrap: break-word;
-  max-width: 0;          /* trick: forces cells to honour table width */
 }
 
 /* ============================================================
@@ -129,6 +133,7 @@ td, th {
   bottom: 88px;
   right: 20px;
   width: 380px;
+  height: 540px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 120px);
   z-index: 1050;
@@ -137,6 +142,7 @@ td, th {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  background: #fff;
 }
 
 .chatbot-trigger {

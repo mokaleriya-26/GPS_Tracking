@@ -56,4 +56,33 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
         ORDER BY a.driver.name, a.alertType
         """)
     List<Object[]> driverAlertBreakdownInDateRange(LocalDateTime from, LocalDateTime to);
+
+    long countByVehicleId(Long vehicleId);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.vehicle.id = :vehicleId AND a.occurredAt BETWEEN :from AND :to")
+    long countByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT a.alertType, COUNT(a) FROM Alert a WHERE a.vehicle.id = :vehicleId GROUP BY a.alertType ORDER BY COUNT(a) DESC")
+    List<Object[]> countByTypeForVehicle(Long vehicleId);
+
+    @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
+    List<Object[]> findTopVehiclesByAlertCount();
+
+    @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL AND a.occurredAt BETWEEN :from AND :to GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
+    List<Object[]> findTopVehiclesByAlertCountInDateRange(LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL AND LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
+    List<Object[]> findTopVehiclesByAlertType(String alertType);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%'))")
+    long countByAlertTypeLike(String alertType);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) AND a.occurredAt BETWEEN :from AND :to")
+    long countByAlertTypeLikeInDateRange(String alertType, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) AND a.status = 'OPEN'")
+    long countOpenByAlertTypeLike(String alertType);
+
+    @Query("SELECT a.alertType, COUNT(a) FROM Alert a GROUP BY a.alertType ORDER BY COUNT(a) DESC")
+    List<Object[]> countAllGroupedByType();
 }

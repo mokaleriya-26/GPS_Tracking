@@ -16,4 +16,5 @@ public class ChatResponseDTO {
     private Object data; // Structured data (tables, rankings, etc.)
     private boolean askingForClarification;
     private String clarificationQuestion;
+    private java.util.List<String> quickActions;
 }
