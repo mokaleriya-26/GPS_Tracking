@@ -42,6 +42,7 @@ public class ChatService {
     private final TripRepository tripRepository;
     private final TelemetryRepository telemetryRepository;
     private final ReportService reportService;
+    private final IntentClassifier intentClassifier;
 
     // In-memory session context for multi-turn dialogue
     private final Map<String, Map<String, String>> sessionContext = new HashMap<>();
@@ -121,105 +122,68 @@ public class ChatService {
         }
 
         // =========================================================
-        // 2. GREETINGS & HELP
+        // 2. INTENT CLASSIFICATION VIA NLP ENGINE
         // =========================================================
-        if (normalized.matches("^(hi|hello|hey|greetings|help|howdy|good\\s+(morning|afternoon|evening)|what can you do).*")
-                || normalized.equals("hi") || normalized.equals("hello") || normalized.equals("hey")) {
-            return handleGreetingOrHelp(sessionId);
-        }
+        IntentClassifier.ClassifiedIntent classified = intentClassifier.classify(message);
+        IntentClassifier.Intent intent = classified.getIntent();
+        log.info("Classified intent: {} (score={}) for msg: {}", intent, classified.getScore(), message);
 
-        // =========================================================
-        // 3. VEHICLE ALERT ANALYSIS (Most alerts / issues)
-        // =========================================================
-        // Only vehicle-focused queries; do NOT capture driver queries like "Which driver has the most alerts?"
-        if (!normalized.contains("driver") && !normalized.contains("drv") &&
-            (normalized.matches(".*(which vehicle|what vehicle|vehicles with|top vehicle|vehicle.*(most|highest|worst|problem|trouble|highest alert)|needs attention).*")
-                || normalized.matches(".*(most alerts|most overspeed|highest overspeed|highest alert|most problem).*"))) {
-            return handleVehicleAlertAnalysis(sessionId, normalized, ctx);
-        }
+        switch (intent) {
+            case GREETING:
+                return handleGreetingOrHelp(sessionId);
 
-        // =========================================================
-        // 4. FLEET SUMMARY & GENERAL COUNTS
-        // =========================================================
-        if (normalized.matches(".*(fleet summary|fleet performance|fleet status|fleet activity|fleet statistics|overall fleet|fleet overview|how is the fleet|how is our fleet).*")
-                || normalized.matches(".*(how many vehicles|how many drivers|how many total trips|fleet stats).*")) {
-            return handleFleetSummary(sessionId, normalized, ctx);
-        }
+            case COMPARE_DRIVERS:
+                return handleCompareDrivers(sessionId, normalized, classified, ctx);
 
-        // =========================================================
-        // 5a. DRIVER RECOMMENDATION (natural-language recommendations)
-        // =========================================================
-        // Detect recommendation intent: recommend/suggest/who should I/which driver would you trust, etc.
-        // Must NOT collide with VEHICLE_ALERT_ANALYSIS (already checked above) or simple ranking (below).
-        if (isDriverRecommendationIntent(normalized)) {
-            return handleDriverRecommendation(sessionId, normalized, ctx);
-        }
+            case DRIVER_RECOMMENDATION:
+                return handleDriverRecommendation(sessionId, normalized, ctx);
 
-        // =========================================================
-        // 5b. DRIVER RANKING & SAFETY LEADERS / DRIVER ALERTS
-        // =========================================================
-        if (normalized.matches(".*(trustworthy|best driver|top driver|safest|safety ranking|driver rank|rank driver|who is the safest|safest driver).*")
-                || (normalized.contains("driver") && normalized.matches(".*(most alert|highest alert|most problem|most overspeed|worst).*"))) {
-            return handleDriverRanking(sessionId, normalized, ctx);
-        }
+            case DRIVER_RANKING:
+                return handleDriverRanking(sessionId, normalized, classified, ctx);
 
-        // =========================================================
-        // 6. SPECIFIC VEHICLE QUERY / STATS / DETAILS
-        // =========================================================
-        if (normalized.matches(".*(tell me about|details for|details of|about|show|check|status of).*vh\\d+.*")
-                || normalized.matches(".*vh\\d+.*(details|info|performance|trips|distance|alerts|speed|status|odometer).*")
-                || normalized.matches(".*(how many trips|how far|distance|performance).*(vh\\d+|vehicle).*")
-                || (("VEHICLE".equals(ctx.get("last_subject")) || normalized.contains(" it ") || normalized.startsWith("it ") || normalized.contains("its"))
-                    && normalized.matches(".*(trips?|alerts?|distance|performance|details|status).*"))) {
-            return handleVehicleQueryOrStats(sessionId, normalized, ctx);
-        }
+            case DRIVER_REPORT:
+                return handleDriverReportIntent(sessionId, normalized, message, classified, ctx);
 
-        // =========================================================
-        // 7. DRIVER STATS / PERFORMANCE
-        // =========================================================
-        if (normalized.matches(".*(how many|statistics|stats|performance).*(driver|drv|rohan|deepak|sunita|amit|kavitha|meena|suresh|vijay|priya|manoj|sanjay|ravi).*")
-                || normalized.matches(".*(driver|drv).*(how many|statistics|stats|performance).*")
-                || (("DRIVER".equals(ctx.get("last_subject")) || normalized.matches(".*\\b(he|him|his|she|her)\\b.*"))
-                    && normalized.matches(".*(trips?|performance|stats|distance|score).*"))) {
-            return handleDriverStats(sessionId, normalized, ctx);
-        }
+            case DRIVER_STATS:
+                return handleDriverStats(sessionId, normalized, ctx);
 
-        // =========================================================
-        // 8. GENERAL / SPECIFIC REPORT TRIGGERS
-        // =========================================================
-        if (normalized.matches(".*(generate|create|download|give me|show|make).*(report).*") || normalized.equals("report") || normalized.equals("reports")) {
-            return handleGeneralReportTrigger(sessionId, normalized, message, ctx);
-        }
-        if (normalized.matches(".*(report|monthly|daily|weekly).*(driver|drv).*") ||
-            normalized.matches(".*(driver|drv).*(report|monthly|daily|weekly).*")) {
-            return handleDriverReportIntent(sessionId, normalized, message, ctx);
-        }
-        if (normalized.matches(".*(report|monthly).*(vehicle|vh\\d+|mh\\d+).*") ||
-            normalized.matches(".*(vehicle|vh\\d+|mh\\d+).*(report|monthly).*")) {
-            return handleVehicleReportIntent(sessionId, normalized, message, ctx);
-        }
-        if (normalized.contains("fleet") && (normalized.contains("report") || normalized.contains("monthly"))) {
-            return handleFleetReport(sessionId, normalized, ctx);
-        }
+            case VEHICLE_ALERT_ANALYSIS:
+                return handleVehicleAlertAnalysis(sessionId, normalized, ctx);
 
-        // =========================================================
-        // 9. ALERT QUERIES & BREAKDOWNS
-        // =========================================================
-        if (normalized.matches(".*(alert|overspeed|harsh braking|disconnect|night driving|speeding incidents|fatigue).*")) {
-            return handleAlertQuery(sessionId, normalized, ctx);
-        }
+            case VEHICLE_STATS:
+                return handleVehicleQueryOrStats(sessionId, normalized, ctx);
 
-        // =========================================================
-        // 10. ENTRY / EXIT INTENT
-        // =========================================================
-        if (normalized.matches(".*(entr|exit|trip count|trips).*")) {
-            return handleEntryExit(sessionId, normalized, ctx);
-        }
+            case OVERALL_REPORT:
+                return handleOverallReport(sessionId, normalized, classified, ctx);
 
-        // =========================================================
-        // 11. UNKNOWN INTENT FALLBACK
-        // =========================================================
-        return handleUnknownFallback(sessionId);
+            case FLEET_REPORT:
+                return handleFleetReport(sessionId, normalized, ctx);
+
+            case ALERT_QUERY:
+                return handleAlertQuery(sessionId, normalized, ctx);
+
+            case TRIP_QUERY:
+                return handleTripQuery(sessionId, normalized, classified, ctx);
+
+            case ENTRY_EXIT:
+                return handleEntryExit(sessionId, normalized, ctx);
+
+            case FLEET_SUMMARY:
+                return handleFleetSummary(sessionId, normalized, ctx);
+
+            case UNKNOWN:
+            default:
+                if (normalized.matches(".*(generate|create|download|give me|show|make).*(report).*") || normalized.equals("report") || normalized.equals("reports")) {
+                    return handleGeneralReportTrigger(sessionId, normalized, message, ctx);
+                }
+                if (resolveDriverFromMessage(message, ctx) != null) {
+                    return handleDriverStats(sessionId, normalized, ctx);
+                }
+                if (resolveVehicleFromMessage(message, ctx) != null) {
+                    return handleVehicleQueryOrStats(sessionId, normalized, ctx);
+                }
+                return handleUnknownFallback(sessionId);
+        }
     }
 
     // =========================================================================
@@ -257,29 +221,33 @@ public class ChatService {
         long activeDrivers = driverRepository.findByActiveTrue().size();
 
         DateRange dr = parseDateRange(normalized);
-        long tripCount;
-        Double totalDistance;
-        long totalAlerts;
-        List<Object[]> alertTypes;
+        boolean isToday = normalized.contains("today") || normalized.contains("operational") || normalized.contains("health") || normalized.contains("status");
+
+        LocalDateTime from, to;
         String periodLabel;
 
         if (dr != null) {
-            LocalDateTime from = dr.startDateTime();
-            LocalDateTime to = dr.endDateTime();
-            tripCount = tripRepository.countInDateRange(from, to);
-            totalDistance = tripRepository.sumDistanceInDateRange(from, to);
-            totalAlerts = alertRepository.countInDateRange(from, to);
-            alertTypes = alertRepository.countByTypeInDateRange(from, to);
+            from = dr.startDateTime();
+            to = dr.endDateTime();
             periodLabel = dr.label;
+        } else if (isToday) {
+            from = LocalDate.now().atStartOfDay();
+            to = LocalDate.now().plusDays(1).atStartOfDay();
+            periodLabel = "Today (" + LocalDate.now() + ")";
         } else {
-            tripCount = tripRepository.count();
-            totalDistance = tripRepository.sumTotalDistance();
-            totalAlerts = alertRepository.count();
-            alertTypes = alertRepository.countAllGroupedByType();
+            from = null;
+            to = null;
             periodLabel = "Overall (All-Time)";
         }
 
+        long tripCount = from != null ? tripRepository.countInDateRange(from, to) : tripRepository.count();
+        Double totalDistance = from != null ? tripRepository.sumDistanceInDateRange(from, to) : tripRepository.sumTotalDistance();
+        long totalAlerts = from != null ? alertRepository.countInDateRange(from, to) : alertRepository.count();
+        List<Object[]> alertTypes = from != null ? alertRepository.countByTypeInDateRange(from, to) : alertRepository.countAllGroupedByType();
         long openAlerts = alertRepository.countOpenAlerts();
+        long critAlerts = from != null ? alertRepository.countBySeverityInDateRange("CRITICAL", from, to) : alertRepository.countBySeverity("CRITICAL");
+        long vehiclesEntered = from != null ? tripRepository.countDistinctVehiclesWithTripStarted(from, to) : 0;
+        long vehiclesExited = from != null ? tripRepository.countDistinctVehiclesWithTripCompleted(from, to) : 0;
 
         Map<String, Long> alertMap = new LinkedHashMap<>();
         for (Object[] row : alertTypes) {
@@ -292,7 +260,17 @@ public class ChatService {
         long nightDriving = alertMap.getOrDefault("Night Driving Alert", 0L);
 
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("📊 **Fleet Summary (%s)**\n\n", periodLabel));
+        sb.append(String.format("📊 **Fleet Summary (%s)**:\n\n", periodLabel));
+        if (from != null) {
+            sb.append(String.format("• **Vehicles entered:** %,d\n", vehiclesEntered));
+            sb.append(String.format("• **Vehicles exited:** %,d\n", vehiclesExited));
+            sb.append(String.format("• **Trips completed:** %,d\n", tripCount));
+            sb.append(String.format("• **Total distance covered:** %,.1f km\n", totalDistance != null ? totalDistance : 0.0));
+            sb.append(String.format("• **Alerts generated:** %,d\n", totalAlerts));
+            sb.append(String.format("• **Critical alerts:** %,d\n", critAlerts));
+            sb.append(String.format("• **Open alerts:** %,d\n\n", openAlerts));
+        }
+
         sb.append("| Metric | Count |\n");
         sb.append("|:---|---:|\n");
         sb.append(String.format("| **Total Vehicles** | %d (%d active) |\n", totalVehicles, activeVehicles));
@@ -388,6 +366,51 @@ public class ChatService {
 
     /** 2 & 6. VEHICLE QUERY & STATS */
     private ChatResponseDTO handleVehicleQueryOrStats(String sessionId, String normalized, Map<String, String> ctx) {
+        if (normalized.contains("inactive")) {
+            List<Vehicle> inactive = vehicleRepository.findByActiveFalse();
+            if (inactive.isEmpty()) {
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("VEHICLE_STATS")
+                    .message("✅ All vehicles in the fleet are currently **active** (0 inactive vehicles).")
+                    .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicle Alerts"))
+                    .build();
+            }
+            StringBuilder sb = new StringBuilder("🚗 **Inactive Vehicles in Fleet:**\n\n");
+            for (Vehicle inv : inactive) {
+                sb.append(String.format("• Vehicle **%s** (%s) — %s (%s)\n",
+                    inv.getCode(), inv.getRegistrationNumber(), inv.getMakeModel(), inv.getVehicleType()));
+            }
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("VEHICLE_STATS")
+                .message(sb.toString())
+                .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicle Alerts"))
+                .build();
+        }
+
+        if (normalized.contains("highest speed") || normalized.contains("fastest vehicle") || normalized.contains("max speed") || normalized.contains("top speed")) {
+            Optional<Telemetry> maxTelem = telemetryRepository.findTopByOrderBySpeedKmphDesc();
+            if (maxTelem.isPresent()) {
+                Telemetry t = maxTelem.get();
+                String vCode = t.getVehicle() != null ? t.getVehicle().getCode() : "Unknown";
+                String vReg = t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : "N/A";
+                double spd = t.getSpeedKmph() != null ? t.getSpeedKmph().doubleValue() : 0.0;
+                String timeStr = t.getRecordedAt() != null ? t.getRecordedAt().toString().replace('T', ' ') : "recorded date";
+                String loc = t.getRoadName() != null ? " on " + t.getRoadName() : "";
+
+                String msg = String.format("🏎️ Vehicle **%s** (%s) recorded the highest speed in the fleet at **%.1f km/h**%s (%s).",
+                    vCode, vReg, spd, loc, timeStr);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("VEHICLE_STATS")
+                    .message(msg)
+                    .quickActions(List.of("Details for " + vCode, "⚠️ Overspeed Alerts", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
         Vehicle v = resolveVehicleFromMessage(normalized, ctx);
 
         if (v == null) {
@@ -475,6 +498,12 @@ public class ChatService {
 
     /** 1. DRIVER RANKING INTENT */
     private ChatResponseDTO handleDriverRanking(String sessionId, String normalized, Map<String, String> ctx) {
+        return handleDriverRanking(sessionId, normalized, null, ctx);
+    }
+
+    private ChatResponseDTO handleDriverRanking(String sessionId, String normalized,
+                                               IntentClassifier.ClassifiedIntent classified,
+                                               Map<String, String> ctx) {
         DateRange dr = parseDateRange(normalized);
         LocalDate from, to;
         String periodLabel;
@@ -490,15 +519,57 @@ public class ChatService {
         }
 
         List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+        if (rankings.isEmpty() && dr == null) {
+            from = LocalDate.of(2020, 1, 1);
+            rankings = driverService.getDriverRanking(from, to);
+            periodLabel = "All-Time";
+        }
 
-        boolean sortByMostAlerts = normalized.matches(".*(most alert|highest alert|most problem|most overspeed).*");
+        boolean sortByMostAlerts = normalized.matches(".*(most alert|highest alert|most problem|most overspeed|worst).*");
         if (sortByMostAlerts) {
             rankings = rankings.stream()
                 .sorted(Comparator.comparingLong((DriverRankingDTO r) -> r.getTotalAlerts() != null ? r.getTotalAlerts() : 0).reversed())
                 .collect(Collectors.toList());
         }
 
-        int limit = 5;
+        // Check if user is asking for the single safest / top driver
+        boolean askingForSingleSafest = !sortByMostAlerts && (normalized.contains("who is safest") || normalized.contains("who is the safest") ||
+            normalized.contains("which driver is safest") || normalized.contains("who has the best safety") ||
+            normalized.contains("who has the highest safety") || normalized.contains("who has the lowest risk") ||
+            normalized.contains("cleanest record") || normalized.contains("safest driver") ||
+            (normalized.contains("top driver") && !normalized.contains("drivers")) ||
+            (normalized.contains("best driver") && !normalized.contains("drivers")))
+            && !normalized.contains("top 5") && !normalized.contains("top 3") && !normalized.contains("top 10")
+            && !normalized.contains("rank") && !normalized.contains("leaderboard");
+
+        if (askingForSingleSafest && !rankings.isEmpty()) {
+            DriverRankingDTO top = rankings.get(0);
+            double score = top.getSafetyScore() != null ? top.getSafetyScore().doubleValue() : 0.0;
+            String singleMsg = String.format("The safest driver is **%s (%s)** with a safety score of **%.1f**, currently ranked **#1**.\n\n" +
+                "• **Completed Trips:** %,d\n" +
+                "• **Distance:** %,.1f km\n" +
+                "• **Total Alerts:** %,d (%d overspeed, %d harsh braking)",
+                top.getDriverName(), top.getDriverCode(), score,
+                top.getTripCount() != null ? top.getTripCount() : 0,
+                top.getTotalDistanceKm() != null ? top.getTotalDistanceKm().doubleValue() : 0.0,
+                top.getTotalAlerts() != null ? top.getTotalAlerts() : 0,
+                top.getOverspeedEvents() != null ? top.getOverspeedEvents() : 0,
+                top.getHarshBrakingEvents() != null ? top.getHarshBrakingEvents() : 0);
+
+            ctx.put("last_subject", "DRIVER");
+            ctx.put("last_driver_id", String.valueOf(top.getDriverId()));
+            ctx.put("last_driver_name", top.getDriverName());
+            ctx.put("last_driver_code", top.getDriverCode());
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("DRIVER_RANKING")
+                .message(singleMsg)
+                .quickActions(List.of("🏆 Top 5 Drivers", "🌟 Recommend Drivers", "📊 Fleet Summary", "📄 " + top.getDriverCode() + " Report"))
+                .build();
+        }
+
+        int limit = (classified != null && classified.getRankingLimit() > 0) ? classified.getRankingLimit() : 5;
         if (normalized.contains("top 10")) limit = 10;
         else if (normalized.contains("top 3")) limit = 3;
 
@@ -517,7 +588,14 @@ public class ChatService {
         if (sortByMostAlerts) {
             table.append(String.format("⚠️ **Drivers with the Most Alerts (%s)**\n\n", periodLabel));
         } else {
-            table.append(String.format("🏆 **Top Drivers by Safety Score (%s)**\n\n", periodLabel));
+            table.append(String.format("🏆 **Top %d Safest Drivers (%s):**\n\n", topN.size(), periodLabel));
+            int rIdx = 1;
+            for (DriverRankingDTO r : topN) {
+                table.append(String.format("%d. **%s** (%s) — **%.1f**\n",
+                    rIdx++, r.getDriverName(), r.getDriverCode(),
+                    r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0));
+            }
+            table.append("\n");
         }
         table.append("| Rank | Driver | Safety Score | Trips | Distance | Alerts | Overspeed | Harsh Braking |\n");
         table.append("|:---:|:---|:---:|---:|---:|---:|---:|---:|\n");
@@ -856,6 +934,19 @@ public class ChatService {
         OptionalDouble avgScore = stats.stream().filter(s -> s.getSafetyScore() != null)
             .mapToDouble(s -> s.getSafetyScore().doubleValue()).average();
 
+        if (tripCount == 0 && dr == null) {
+            tripCount = tripRepository.countByDriverId(driver.getId());
+            List<DriverRankingDTO> allRankings = driverService.getDriverRanking(LocalDate.of(2020, 1, 1), LocalDate.now());
+            Optional<DriverRankingDTO> rOpt = allRankings.stream().filter(r -> r.getDriverId().equals(driver.getId())).findFirst();
+            if (rOpt.isPresent()) {
+                DriverRankingDTO r = rOpt.get();
+                if (r.getTotalDistanceKm() != null && r.getTotalDistanceKm().doubleValue() > 0) dist = r.getTotalDistanceKm().doubleValue();
+                if (r.getOverspeedEvents() != null) overspeed = r.getOverspeedEvents();
+                if (r.getSafetyScore() != null) avgScore = OptionalDouble.of(r.getSafetyScore().doubleValue());
+                periodLabel = "All-Time";
+            }
+        }
+
         StringBuilder sb = new StringBuilder();
         sb.append(String.format("👨 **Driver Performance: %s (%s)**\n\n", driver.getName(), driver.getCode()));
         sb.append(String.format("Period: **%s** (%s to %s)\n\n", periodLabel, from, to));
@@ -921,8 +1012,25 @@ public class ChatService {
 
     /** DRIVER REPORT INTENT */
     private ChatResponseDTO handleDriverReportIntent(String sessionId, String normalized, String original, Map<String, String> ctx) {
-        Driver driver = resolveDriverFromMessage(normalized, ctx);
+        return handleDriverReportIntent(sessionId, normalized, original, null, ctx);
+    }
 
+    private ChatResponseDTO handleDriverReportIntent(String sessionId, String normalized, String original,
+                                                    IntentClassifier.ClassifiedIntent classified,
+                                                    Map<String, String> ctx) {
+        Driver driver = null;
+        if (classified != null && classified.getDriverCodeHint() != null) {
+            driver = driverRepository.findByCode(classified.getDriverCodeHint()).orElse(null);
+        }
+        if (driver == null && classified != null && classified.getDriverNameHint() != null) {
+            String nameHint = classified.getDriverNameHint().toLowerCase();
+            driver = driverRepository.findAll().stream()
+                .filter(d -> d.getName().toLowerCase().contains(nameHint))
+                .findFirst().orElse(null);
+        }
+        if (driver == null) {
+            driver = resolveDriverFromMessage(normalized, ctx);
+        }
         if (driver == null && ctx.containsKey("last_driver_id")) {
             driver = driverRepository.findById(Long.parseLong(ctx.get("last_driver_id"))).orElse(null);
         }
@@ -945,15 +1053,33 @@ public class ChatService {
         ctx.put("last_driver_code", driver.getCode());
 
         String reportType = "MONTHLY";
-        if (normalized.contains("daily")) reportType = "DAILY";
-        else if (normalized.contains("weekly")) reportType = "WEEKLY";
+        if (classified != null && classified.getPeriod() != null) {
+            switch (classified.getPeriod()) {
+                case DAILY: reportType = "DAILY"; break;
+                case WEEKLY: reportType = "WEEKLY"; break;
+                case CUSTOM: reportType = "CUSTOM"; break;
+                default: reportType = "MONTHLY"; break;
+            }
+        } else if (normalized.contains("daily") || normalized.contains("today")) {
+            reportType = "DAILY";
+        } else if (normalized.contains("weekly") || normalized.contains("week")) {
+            reportType = "WEEKLY";
+        }
+
+        String intentName = "DRIVER_" + reportType + "_REPORT";
 
         DateRange dr = parseDateRange(normalized);
         LocalDate startDate, endDate;
 
-        if (dr != null) {
+        if (classified != null && classified.getDateFrom() != null) {
+            startDate = classified.getDateFrom();
+            endDate = classified.getDateTo();
+        } else if (dr != null) {
             startDate = dr.startDate;
             endDate = dr.endDate;
+        } else if (classified != null && classified.getYearMonth() != null) {
+            startDate = classified.getYearMonth().atDay(1);
+            endDate = classified.getYearMonth().atEndOfMonth();
         } else if ("MONTHLY".equals(reportType)) {
             YearMonth ym = extractYearMonth(normalized);
             if (ym != null) {
@@ -964,27 +1090,75 @@ public class ChatService {
                 ctx.put("pending_driver_id", String.valueOf(driver.getId()));
                 ctx.put("pending_report_type", reportType);
                 return ChatResponseDTO.builder()
-                    .sessionId(sessionId).intent("DRIVER_REPORT")
+                    .sessionId(sessionId).intent(intentName)
                     .message("For which month would you like **" + driver.getName() + "'s** report?")
                     .askingForClarification(true)
                     .clarificationQuestion("Please specify the month.")
                     .quickActions(List.of("September 2026", "October 2026", "August 2026"))
                     .build();
             }
+        } else if ("DAILY".equals(reportType)) {
+            startDate = LocalDate.now();
+            endDate = LocalDate.now();
+        } else if ("WEEKLY".equals(reportType)) {
+            startDate = LocalDate.now().minusDays(7);
+            endDate = LocalDate.now();
         } else {
             startDate = LocalDate.now().withDayOfMonth(1);
             endDate = LocalDate.now();
         }
 
-        return generateDriverReportResponse(sessionId, driver, reportType, startDate, endDate, ctx);
+        // If the query is an inquiry about performance without asking directly for PDF/download
+        boolean wantsPdfDirectly = normalized.contains("pdf") || normalized.contains("download") || normalized.contains("generate");
+        if (!wantsPdfDirectly && (normalized.contains("performance") || normalized.contains("how did") || normalized.contains("how was"))) {
+            return buildDriverPerformanceSummaryResponse(sessionId, driver, reportType, intentName, startDate, endDate, ctx);
+        }
+
+        return generateDriverReportResponse(sessionId, driver, reportType, intentName, startDate, endDate, ctx);
+    }
+
+    private ChatResponseDTO buildDriverPerformanceSummaryResponse(String sessionId, Driver driver, String reportType,
+                                                                   String intentName, LocalDate startDate, LocalDate endDate,
+                                                                   Map<String, String> ctx) {
+        long trips = tripRepository.countByDriverIdAndDateRange(driver.getId(), startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
+        Double dist = tripRepository.sumDistanceByDriverAndDateRange(driver.getId(), startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay());
+        List<DriverRankingDTO> rankings = driverService.getDriverRanking(startDate, endDate);
+        DriverRankingDTO rankInfo = rankings.stream().filter(r -> r.getDriverId().equals(driver.getId())).findFirst().orElse(null);
+
+        double score = rankInfo != null && rankInfo.getSafetyScore() != null ? rankInfo.getSafetyScore().doubleValue() : 85.0;
+        long overspeed = rankInfo != null && rankInfo.getOverspeedEvents() != null ? rankInfo.getOverspeedEvents() : 0;
+        long harshBraking = rankInfo != null && rankInfo.getHarshBrakingEvents() != null ? rankInfo.getHarshBrakingEvents() : 0;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("📊 **%s Performance for %s (%s)**:\n\n", reportType, driver.getName(), driver.getCode()));
+        sb.append(String.format("Period: **%s to %s**\n\n", startDate, endDate));
+        sb.append(String.format("• **Safety Score:** **%.1f / 100**\n", score));
+        sb.append(String.format("• **Completed Trips:** %,d\n", trips));
+        sb.append(String.format("• **Distance Covered:** %,.1f km\n", dist != null ? dist : 0.0));
+        sb.append(String.format("• **Overspeed Events:** %,d\n", overspeed));
+        sb.append(String.format("• **Harsh Braking Events:** %,d\n\n", harshBraking));
+        sb.append("📄 *Would you like me to generate the official PDF report for this period?*");
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent(intentName)
+            .message(sb.toString())
+            .quickActions(List.of("📄 Generate " + driver.getCode() + " PDF", "🏆 Driver Rankings", "📊 Fleet Summary"))
+            .build();
     }
 
     private ChatResponseDTO generateDriverReportResponse(String sessionId, Driver driver,
                                                           String reportType, LocalDate startDate,
                                                           LocalDate endDate, Map<String, String> ctx) {
+        return generateDriverReportResponse(sessionId, driver, reportType, "DRIVER_" + reportType + "_REPORT", startDate, endDate, ctx);
+    }
+
+    private ChatResponseDTO generateDriverReportResponse(String sessionId, Driver driver,
+                                                          String reportType, String intentName,
+                                                          LocalDate startDate, LocalDate endDate, Map<String, String> ctx) {
         try {
             ReportRequestDTO req = new ReportRequestDTO();
-            req.setReportType(reportType);
+            req.setReportType("CUSTOM".equals(reportType) ? "MONTHLY" : reportType);
             req.setDriverId(driver.getId());
             req.setStartDate(startDate);
             req.setEndDate(endDate);
@@ -992,7 +1166,7 @@ public class ChatService {
             ReportResponseDTO report = reportService.generateDriverReport(req);
 
             return ChatResponseDTO.builder()
-                .sessionId(sessionId).intent("DRIVER_REPORT")
+                .sessionId(sessionId).intent(intentName)
                 .message(String.format("✅ **%s Report for %s (%s)** is ready!\n\nPeriod: **%s to %s**\nClick below to view or download the generated PDF.",
                     reportType, driver.getName(), driver.getCode(), startDate, endDate))
                 .reportId(report.getReportId())
@@ -1004,7 +1178,7 @@ public class ChatService {
         } catch (Exception e) {
             log.error("Error generating driver report", e);
             return ChatResponseDTO.builder()
-                .sessionId(sessionId).intent("DRIVER_REPORT")
+                .sessionId(sessionId).intent(intentName)
                 .message("Sorry, I encountered an error generating the report: " + e.getMessage())
                 .build();
         }
@@ -1084,9 +1258,184 @@ public class ChatService {
 
     /** 9. ALERT QUERY INTENT */
     private ChatResponseDTO handleAlertQuery(String sessionId, String normalized, Map<String, String> ctx) {
+        LocalDate now = LocalDate.now();
+        DateRange dr = parseDateRange(normalized);
+        LocalDate from = dr != null ? dr.startDate : LocalDate.of(2020, 1, 1);
+        LocalDate to = dr != null ? dr.endDate : now;
+
+        // 1. "Which driver has the most violations?" / "most alerts"
+        if (normalized.contains("driver") && (normalized.contains("most violation") || normalized.contains("most alert") || normalized.contains("highest alert"))) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            if (!rankings.isEmpty()) {
+                DriverRankingDTO worst = rankings.stream()
+                    .max(Comparator.comparingLong(r -> r.getTotalAlerts() != null ? r.getTotalAlerts() : 0))
+                    .orElse(rankings.get(0));
+
+                String msg = String.format("⚠️ Driver **%s (%s)** has the highest number of violations with **%,d total alerts** (%,d overspeed, %,d harsh braking) across %,d trips. Safety Score: **%.1f**.",
+                    worst.getDriverName(), worst.getDriverCode(),
+                    worst.getTotalAlerts() != null ? worst.getTotalAlerts() : 0,
+                    worst.getOverspeedEvents() != null ? worst.getOverspeedEvents() : 0,
+                    worst.getHarshBrakingEvents() != null ? worst.getHarshBrakingEvents() : 0,
+                    worst.getTripCount() != null ? worst.getTripCount() : 0,
+                    worst.getSafetyScore() != null ? worst.getSafetyScore().doubleValue() : 0.0);
+
+                ctx.put("last_subject", "DRIVER");
+                ctx.put("last_driver_id", String.valueOf(worst.getDriverId()));
+                ctx.put("last_driver_name", worst.getDriverName());
+                ctx.put("last_driver_code", worst.getDriverCode());
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("ALERT_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("Details for " + worst.getDriverCode(), "🏆 Safest Driver", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
+        // 2. "Which driver needs training?" / "poor performance" / "needs improvement"
+        if (normalized.contains("training") || normalized.contains("poor performance") || normalized.contains("improvement") || normalized.contains("worst driver")) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            if (!rankings.isEmpty()) {
+                DriverRankingDTO lowest = rankings.stream()
+                    .min(Comparator.comparingDouble(r -> r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 100.0))
+                    .orElse(rankings.get(rankings.size() - 1));
+
+                String msg = String.format("⚠️ Driver **%s (%s)** has the lowest safety score (**%.1f / 100**) with **%,d alerts** (%d overspeed, %d harsh braking). This driver would benefit most from safety coaching and driver refresher training.",
+                    lowest.getDriverName(), lowest.getDriverCode(),
+                    lowest.getSafetyScore() != null ? lowest.getSafetyScore().doubleValue() : 0.0,
+                    lowest.getTotalAlerts() != null ? lowest.getTotalAlerts() : 0,
+                    lowest.getOverspeedEvents() != null ? lowest.getOverspeedEvents() : 0,
+                    lowest.getHarshBrakingEvents() != null ? lowest.getHarshBrakingEvents() : 0);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("ALERT_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("Details for " + lowest.getDriverCode(), "🏆 Safest Driver", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
+        // 3. "Which drivers have repeated harsh braking?"
+        if (normalized.contains("harsh braking") && (normalized.contains("driver") || normalized.contains("repeated") || normalized.contains("who"))) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            List<DriverRankingDTO> harshDrivers = rankings.stream()
+                .filter(r -> r.getHarshBrakingEvents() != null && r.getHarshBrakingEvents() > 0)
+                .sorted(Comparator.comparingLong((DriverRankingDTO r) -> r.getHarshBrakingEvents()).reversed())
+                .limit(5)
+                .collect(Collectors.toList());
+
+            if (!harshDrivers.isEmpty()) {
+                StringBuilder sb = new StringBuilder("⚠️ **Drivers with Repeated Harsh Braking Events:**\n\n");
+                int rank = 1;
+                for (DriverRankingDTO r : harshDrivers) {
+                    sb.append(String.format("%d. **%s** (%s) — **%,d harsh braking events** (Safety score: %.1f)\n",
+                        rank++, r.getDriverName(), r.getDriverCode(), r.getHarshBrakingEvents(),
+                        r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0));
+                }
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("ALERT_QUERY")
+                    .message(sb.toString())
+                    .quickActions(List.of("🏆 Safest Driver", "📊 Fleet Summary", "🚗 Vehicle Alerts"))
+                    .build();
+            }
+        }
+
+        // 4. "Which drivers had overspeed violations?"
+        if (normalized.contains("overspeed") && (normalized.contains("driver") || normalized.contains("who") || normalized.contains("violations"))) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            List<DriverRankingDTO> overspeedDrivers = rankings.stream()
+                .filter(r -> r.getOverspeedEvents() != null && r.getOverspeedEvents() > 0)
+                .sorted(Comparator.comparingLong((DriverRankingDTO r) -> r.getOverspeedEvents()).reversed())
+                .limit(5)
+                .collect(Collectors.toList());
+
+            if (!overspeedDrivers.isEmpty()) {
+                StringBuilder sb = new StringBuilder("🚨 **Drivers with Overspeed Violations:**\n\n");
+                int rank = 1;
+                for (DriverRankingDTO r : overspeedDrivers) {
+                    sb.append(String.format("%d. **%s** (%s) — **%,d overspeed events** (Safety score: %.1f)\n",
+                        rank++, r.getDriverName(), r.getDriverCode(), r.getOverspeedEvents(),
+                        r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0));
+                }
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("ALERT_QUERY")
+                    .message(sb.toString())
+                    .quickActions(List.of("🏆 Safest Driver", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
+        // 5. "What is the most common alert type?"
+        if (normalized.contains("most common alert") || normalized.contains("common violation")) {
+            List<Object[]> allTypes = alertRepository.countAllGroupedByType();
+            if (!allTypes.isEmpty()) {
+                Object[] topType = allTypes.get(0);
+                long topCount = ((Number) topType[1]).longValue();
+                long total = alertRepository.count();
+                double pct = total > 0 ? (topCount * 100.0) / total : 0.0;
+
+                String msg = String.format("⚠️ The most common alert type across the fleet is **%s** with **%,d occurrences** (representing **%.1f%%** of all %,d total fleet alerts).",
+                    topType[0], topCount, pct, total);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("ALERT_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicle Alerts", "🏆 Safest Driver"))
+                    .build();
+            }
+        }
+
+        // 6. "How many critical alerts occurred?" / "unresolved critical alerts" / "open alerts"
+        if (normalized.contains("critical") || normalized.contains("unresolved")) {
+            long totalCrit = alertRepository.countBySeverity("CRITICAL");
+            long openCrit = alertRepository.countOpenCriticalAlerts();
+            List<Alert> openCritList = alertRepository.findOpenCriticalAlerts();
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("🚨 **Critical Alerts Overview**:\n\n"));
+            sb.append(String.format("• **Total Historical Critical Alerts:** **%,d**\n", totalCrit));
+            sb.append(String.format("• **Currently Unresolved / Open:** **%,d**\n\n", openCrit));
+
+            if (!openCritList.isEmpty()) {
+                sb.append("**Active Critical Incidents:**\n");
+                for (Alert a : openCritList.stream().limit(3).collect(Collectors.toList())) {
+                    String vCode = a.getVehicle() != null ? a.getVehicle().getCode() : "Unknown";
+                    String dName = a.getDriver() != null ? a.getDriver().getName() : "Unassigned";
+                    sb.append(String.format("• **%s** on vehicle **%s** (Driver: %s) — *%s*\n",
+                        a.getAlertType(), vCode, dName, a.getOccurredAt() != null ? a.getOccurredAt().toString().replace('T', ' ') : "Recent"));
+                }
+            } else {
+                sb.append("✅ *There are currently no open critical alerts in the fleet.*");
+            }
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("ALERT_QUERY")
+                .message(sb.toString())
+                .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicle Alerts", "🏆 Safest Driver"))
+                .build();
+        }
+
+        // 7. "How many warnings occurred?"
+        if (normalized.contains("warning")) {
+            long warnCount = alertRepository.countBySeverity("WARNING");
+            String msg = String.format("⚠️ There have been **%,d warning alerts** recorded across the fleet.", warnCount);
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("ALERT_QUERY")
+                .message(msg)
+                .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+                .build();
+        }
+
+        // 8. Specific type filter e.g. "overspeed", "harsh braking", "gps disconnect", "night driving", "fatigue"
         String typeFilter = null;
         String typeLabel = null;
-
         if (normalized.contains("overspeed") || normalized.contains("speed")) {
             typeFilter = "overspeed";
             typeLabel = "Overspeed";
@@ -1104,9 +1453,7 @@ public class ChatService {
             typeLabel = "Fatigue";
         }
 
-        DateRange dr = parseDateRange(normalized);
         StringBuilder sb = new StringBuilder();
-
         if (typeFilter != null) {
             long totalForType = dr != null
                 ? alertRepository.countByAlertTypeLikeInDateRange(typeFilter, dr.startDateTime(), dr.endDateTime())
@@ -1151,8 +1498,20 @@ public class ChatService {
     /** 10. ENTRY / EXIT INTENT */
     private ChatResponseDTO handleEntryExit(String sessionId, String normalized, Map<String, String> ctx) {
         DateRange dr = parseDateRange(normalized);
-        LocalDate from = dr != null ? dr.startDate : LocalDate.now().withDayOfMonth(1);
-        LocalDate to = dr != null ? dr.endDate : LocalDate.now();
+        LocalDate from, to;
+        if (dr != null) {
+            from = dr.startDate;
+            to = dr.endDate;
+        } else if (normalized.contains("week")) {
+            from = LocalDate.now().minusDays(7);
+            to = LocalDate.now();
+        } else if (normalized.contains("month")) {
+            from = LocalDate.now().withDayOfMonth(1);
+            to = LocalDate.now();
+        } else {
+            from = LocalDate.now();
+            to = LocalDate.now();
+        }
 
         LocalDateTime fromDt = from.atStartOfDay();
         LocalDateTime toDt = to.plusDays(1).atStartOfDay();
@@ -1160,19 +1519,445 @@ public class ChatService {
         long entries = tripRepository.countDistinctVehiclesWithTripStarted(fromDt, toDt);
         long exits = tripRepository.countDistinctVehiclesWithTripCompleted(fromDt, toDt);
 
-        String msg = String.format(
-            "🚪 **Entry / Exit Activity (%s to %s)**:\n\n" +
-            "• **Vehicle Entries (Trips Started):** **%,d** active vehicles\n" +
-            "• **Vehicle Exits (Trips Completed):** **%,d** completed trips\n\n" +
-            "Trips start when vehicle ignition is turned ON and finish when the engine is turned OFF.\n" +
-            "Full timestamped logs are accessible on the Trips page.",
-            from, to, entries, exits);
+        String msg;
+        if (normalized.contains("entered") && !normalized.contains("exit")) {
+            msg = String.format("🚪 **Vehicles Entered (Trips Started) (%s to %s):** **%,d** active vehicles.", from, to, entries);
+        } else if (normalized.contains("exited") && !normalized.contains("enter")) {
+            msg = String.format("🚪 **Vehicles Exited (Trips Completed) (%s to %s):** **%,d** completed trips.", from, to, exits);
+        } else {
+            msg = String.format(
+                "🚪 **Entry / Exit Activity (%s to %s)**:\n\n" +
+                "• **Vehicle Entries (Trips Started):** **%,d** active vehicles\n" +
+                "• **Vehicle Exits (Trips Completed):** **%,d** completed trips\n\n" +
+                "Trips start when vehicle ignition is turned ON and finish when the engine is turned OFF.\n" +
+                "Full timestamped logs are accessible on the Trips page.",
+                from, to, entries, exits);
+        }
 
         return ChatResponseDTO.builder()
             .sessionId(sessionId)
             .intent("ENTRY_EXIT")
             .message(msg)
             .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicle Alerts", "🏆 Safest Driver"))
+            .build();
+    }
+
+    /** COMPARE DRIVERS INTENT */
+    private ChatResponseDTO handleCompareDrivers(String sessionId, String normalized,
+                                                 IntentClassifier.ClassifiedIntent classified,
+                                                 Map<String, String> ctx) {
+        List<Driver> allDrivers = driverRepository.findAll();
+        List<Driver> matched = new ArrayList<>();
+        Set<Long> seenIds = new HashSet<>();
+
+        // Check for DRV codes
+        Matcher m = Pattern.compile("drv0*(\\d+)").matcher(normalized);
+        while (m.find()) {
+            String code = "DRV" + String.format("%03d", Integer.parseInt(m.group(1)));
+            driverRepository.findByCode(code).ifPresent(d -> {
+                if (seenIds.add(d.getId())) matched.add(d);
+            });
+        }
+
+        // Check for driver names in text
+        for (Driver d : allDrivers) {
+            String[] parts = d.getName().toLowerCase().split("\\s+");
+            for (String part : parts) {
+                if (part.length() >= 3 && normalized.contains(part)) {
+                    if (seenIds.add(d.getId())) matched.add(d);
+                    break;
+                }
+            }
+        }
+
+        // If user says "compare top 5" or "compare top drivers"
+        if (matched.size() < 2 && (normalized.contains("top") || matched.isEmpty())) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(LocalDate.of(2020, 1, 1), LocalDate.now());
+            int limit = classified != null && classified.getRankingLimit() > 0 ? classified.getRankingLimit() : 5;
+            List<DriverRankingDTO> topList = rankings.stream().limit(limit).collect(Collectors.toList());
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("⚖️ **Driver Comparison (Top %d Drivers)**\n\n", topList.size()));
+            sb.append("| Rank | Driver | Safety Score | Trips | Distance | Overspeed | Harsh Braking |\n");
+            sb.append("|:---:|:---|:---:|---:|---:|---:|---:|\n");
+            int rank = 1;
+            for (DriverRankingDTO r : topList) {
+                sb.append(String.format("| %d | **%s** (%s) | **%.1f** | %,d | %,.1f km | %,d | %,d |\n",
+                    rank++, r.getDriverName(), r.getDriverCode(),
+                    r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0,
+                    r.getTripCount() != null ? r.getTripCount() : 0,
+                    r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0,
+                    r.getOverspeedEvents() != null ? r.getOverspeedEvents() : 0,
+                    r.getHarshBrakingEvents() != null ? r.getHarshBrakingEvents() : 0));
+            }
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("COMPARE_DRIVERS")
+                .message(sb.toString())
+                .quickActions(List.of("🏆 Safest Driver", "🌟 Recommend Drivers", "📊 Fleet Summary"))
+                .build();
+        }
+
+        if (matched.size() < 2) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("COMPARE_DRIVERS")
+                .message("Which two drivers would you like to compare? Please mention two driver names or codes (e.g. *Compare Rohan and Priya* or *Compare DRV001 and DRV002*).")
+                .askingForClarification(true)
+                .clarificationQuestion("Please specify two drivers to compare.")
+                .quickActions(List.of("Compare Rohan and Deepak", "Compare DRV001 and DRV002", "Compare Top 5 Drivers"))
+                .build();
+        }
+
+        Driver d1 = matched.get(0);
+        Driver d2 = matched.get(1);
+
+        List<DriverRankingDTO> rankings = driverService.getDriverRanking(LocalDate.of(2020, 1, 1), LocalDate.now());
+        DriverRankingDTO r1 = rankings.stream().filter(r -> r.getDriverId().equals(d1.getId())).findFirst().orElse(null);
+        DriverRankingDTO r2 = rankings.stream().filter(r -> r.getDriverId().equals(d2.getId())).findFirst().orElse(null);
+
+        double score1 = r1 != null && r1.getSafetyScore() != null ? r1.getSafetyScore().doubleValue() : 0.0;
+        double score2 = r2 != null && r2.getSafetyScore() != null ? r2.getSafetyScore().doubleValue() : 0.0;
+        long trips1 = r1 != null && r1.getTripCount() != null ? r1.getTripCount() : 0;
+        long trips2 = r2 != null && r2.getTripCount() != null ? r2.getTripCount() : 0;
+        double dist1 = r1 != null && r1.getTotalDistanceKm() != null ? r1.getTotalDistanceKm().doubleValue() : 0.0;
+        double dist2 = r2 != null && r2.getTotalDistanceKm() != null ? r2.getTotalDistanceKm().doubleValue() : 0.0;
+        long alerts1 = r1 != null && r1.getTotalAlerts() != null ? r1.getTotalAlerts() : 0;
+        long alerts2 = r2 != null && r2.getTotalAlerts() != null ? r2.getTotalAlerts() : 0;
+        long overspeed1 = r1 != null && r1.getOverspeedEvents() != null ? r1.getOverspeedEvents() : 0;
+        long overspeed2 = r2 != null && r2.getOverspeedEvents() != null ? r2.getOverspeedEvents() : 0;
+        long harsh1 = r1 != null && r1.getHarshBrakingEvents() != null ? r1.getHarshBrakingEvents() : 0;
+        long harsh2 = r2 != null && r2.getHarshBrakingEvents() != null ? r2.getHarshBrakingEvents() : 0;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("⚖️ **Driver Comparison: %s vs %s**\n\n", d1.getName(), d2.getName()));
+        sb.append(String.format("| Metric | %s (%s) | %s (%s) |\n", d1.getName(), d1.getCode(), d2.getName(), d2.getCode()));
+        sb.append("|:---|:---:|:---:|\n");
+        sb.append(String.format("| **Safety Score** | **%.1f** | **%.1f** |\n", score1, score2));
+        sb.append(String.format("| **Total Trips** | %,d | %,d |\n", trips1, trips2));
+        sb.append(String.format("| **Total Distance** | %,.1f km | %,.1f km |\n", dist1, dist2));
+        sb.append(String.format("| **Total Alerts** | %,d | %,d |\n", alerts1, alerts2));
+        sb.append(String.format("| **Overspeed Events** | %,d | %,d |\n", overspeed1, overspeed2));
+        sb.append(String.format("| **Harsh Braking** | %,d | %,d |\n\n", harsh1, harsh2));
+
+        if (score1 > score2) {
+            sb.append(String.format("🏆 **Verdict:** **%s** has a stronger safety record with a safety score of **%.1f** (vs %.1f) and fewer violations relative to trips.",
+                d1.getName(), score1, score2));
+        } else if (score2 > score1) {
+            sb.append(String.format("🏆 **Verdict:** **%s** has a stronger safety record with a safety score of **%.1f** (vs %.1f) and fewer violations relative to trips.",
+                d2.getName(), score2, score1));
+        } else {
+            sb.append(String.format("🏆 **Verdict:** Both drivers are tied with an identical safety score of **%.1f**.", score1));
+        }
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("COMPARE_DRIVERS")
+            .message(sb.toString())
+            .quickActions(List.of("📄 " + d1.getCode() + " Report", "📄 " + d2.getCode() + " Report", "🏆 Safest Driver"))
+            .build();
+    }
+
+    /** TRIP QUERY INTENT */
+    private ChatResponseDTO handleTripQuery(String sessionId, String normalized,
+                                           IntentClassifier.ClassifiedIntent classified,
+                                           Map<String, String> ctx) {
+        LocalDate now = LocalDate.now();
+        DateRange dr = parseDateRange(normalized);
+        LocalDate from = dr != null ? dr.startDate : LocalDate.of(2020, 1, 1);
+        LocalDate to = dr != null ? dr.endDate : now;
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt = to.plusDays(1).atStartOfDay();
+
+        // 1. Check if specific driver mentioned e.g. "How many trips did Rohan complete?"
+        Driver d = resolveDriverFromMessage(normalized, ctx);
+        if (d != null) {
+            long driverTrips = tripRepository.countByDriverIdAndDateRange(d.getId(), fromDt, toDt);
+            if (driverTrips == 0 && dr == null) {
+                driverTrips = tripRepository.countByDriverId(d.getId());
+            }
+            Double driverDist = tripRepository.sumDistanceByDriverAndDateRange(d.getId(), fromDt, toDt);
+            if (driverDist == null || (driverDist == 0.0 && dr == null)) {
+                driverDist = 0.0;
+            }
+
+            ctx.put("last_subject", "DRIVER");
+            ctx.put("last_driver_id", String.valueOf(d.getId()));
+            ctx.put("last_driver_name", d.getName());
+            ctx.put("last_driver_code", d.getCode());
+
+            String msg = String.format("🚗 Driver **%s (%s)** completed **%,d trips** covering **%,.1f km**%s.",
+                d.getName(), d.getCode(), driverTrips, driverDist != null ? driverDist : 0.0,
+                dr != null ? " (" + dr.label + ")" : " overall");
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("TRIP_QUERY")
+                .message(msg)
+                .quickActions(List.of("Details for " + d.getCode(), "📄 " + d.getCode() + " Report", "🏆 Safest Driver"))
+                .build();
+        }
+
+        // 2. "Which driver completed the most trips?"
+        if (normalized.contains("most trip") || normalized.contains("completed the most")) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            if (!rankings.isEmpty()) {
+                DriverRankingDTO topTrips = rankings.stream()
+                    .max(Comparator.comparingLong(r -> r.getTripCount() != null ? r.getTripCount() : 0))
+                    .orElse(rankings.get(0));
+
+                String msg = String.format("🏆 Driver **%s (%s)** completed the most trips with **%,d trips** (%,.1f km total).",
+                    topTrips.getDriverName(), topTrips.getDriverCode(),
+                    topTrips.getTripCount() != null ? topTrips.getTripCount() : 0,
+                    topTrips.getTotalDistanceKm() != null ? topTrips.getTotalDistanceKm().doubleValue() : 0.0);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("TRIP_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("Details for " + topTrips.getDriverCode(), "🏆 Safest Driver", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
+        // 3. "Which driver travelled the most distance?" / "who travelled the most"
+        if (normalized.contains("travelled the most") || normalized.contains("traveled the most") ||
+            normalized.contains("most distance") || normalized.contains("longest distance")) {
+            List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+            if (!rankings.isEmpty()) {
+                DriverRankingDTO topDist = rankings.stream()
+                    .max(Comparator.comparingDouble(r -> r.getTotalDistanceKm() != null ? r.getTotalDistanceKm().doubleValue() : 0.0))
+                    .orElse(rankings.get(0));
+
+                String msg = String.format("🛣️ Driver **%s (%s)** travelled the most distance with **%,.1f km** across %,d completed trips.",
+                    topDist.getDriverName(), topDist.getDriverCode(),
+                    topDist.getTotalDistanceKm() != null ? topDist.getTotalDistanceKm().doubleValue() : 0.0,
+                    topDist.getTripCount() != null ? topDist.getTripCount() : 0);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("TRIP_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("Details for " + topDist.getDriverCode(), "🏆 Safest Driver", "📊 Fleet Summary"))
+                    .build();
+            }
+        }
+
+        // 4. "What was the longest trip?"
+        if (normalized.contains("longest trip")) {
+            List<Trip> allTrips = tripRepository.findByStartTimeBetween(fromDt, toDt);
+            if (allTrips.isEmpty() && dr == null) {
+                allTrips = tripRepository.findAll();
+            }
+            Optional<Trip> longest = allTrips.stream()
+                .filter(t -> t.getDistanceKm() != null)
+                .max(Comparator.comparingDouble(t -> t.getDistanceKm().doubleValue()));
+
+            if (longest.isPresent()) {
+                Trip t = longest.get();
+                String driverName = t.getDriver() != null ? t.getDriver().getName() : "Unknown";
+                String vCode = t.getVehicle() != null ? t.getVehicle().getCode() : "Unknown";
+                String msg = String.format("📏 The longest recorded trip was **%,.1f km**, driven by **%s** in vehicle **%s** on %s.",
+                    t.getDistanceKm(), driverName, vCode,
+                    t.getStartTime() != null ? t.getStartTime().toLocalDate() : "N/A");
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("TRIP_QUERY")
+                    .message(msg)
+                    .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+                    .build();
+            }
+        }
+
+        // 5. "What is the average trip distance?"
+        if (normalized.contains("average trip distance") || normalized.contains("average distance")) {
+            long totalTrips = dr != null ? tripRepository.countInDateRange(fromDt, toDt) : tripRepository.count();
+            Double totalDist = dr != null ? tripRepository.sumDistanceInDateRange(fromDt, toDt) : tripRepository.sumTotalDistance();
+            double avg = (totalTrips > 0 && totalDist != null) ? totalDist / totalTrips : 0.0;
+
+            String msg = String.format("📏 The average trip distance across the fleet is **%.1f km** (based on %,d completed trips).",
+                avg, totalTrips);
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("TRIP_QUERY")
+                .message(msg)
+                .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+                .build();
+        }
+
+        // 6. "What is the average trip duration?"
+        if (normalized.contains("average trip duration") || normalized.contains("trip duration") || normalized.contains("duration")) {
+            List<Trip> trips = tripRepository.findByStartTimeBetween(fromDt, toDt);
+            if (trips.isEmpty() && dr == null) {
+                trips = tripRepository.findAll();
+            }
+            long totalMinutes = 0;
+            long finishedCount = 0;
+            for (Trip t : trips) {
+                if (t.getStartTime() != null && t.getEndTime() != null) {
+                    long mins = java.time.Duration.between(t.getStartTime(), t.getEndTime()).toMinutes();
+                    if (mins > 0 && mins < 1440) {
+                        totalMinutes += mins;
+                        finishedCount++;
+                    }
+                }
+            }
+            long avgMins = finishedCount > 0 ? totalMinutes / finishedCount : 45;
+            String msg = String.format("⏱️ The average trip duration across the fleet is approximately **%d minutes** (based on %,d finished trips).",
+                avgMins, finishedCount);
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("TRIP_QUERY")
+                .message(msg)
+                .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+                .build();
+        }
+
+        // 7. General trip query / "show today's trips"
+        long count = tripRepository.countInDateRange(fromDt, toDt);
+        Double dist = tripRepository.sumDistanceInDateRange(fromDt, toDt);
+        String label = dr != null ? dr.label : "Today (" + now + ")";
+        String msg = String.format("🛣️ **Trip Activity (%s)**:\n\n" +
+            "• **Trips Started/Completed:** **%,d**\n" +
+            "• **Total Distance Covered:** **%,.1f km**\n" +
+            "• **Average Distance per Trip:** **%.1f km**\n\n" +
+            "Full per-trip GPS breadcrumbs, routes, and speed graphs are viewable in the Trips dashboard.",
+            label, count, dist != null ? dist : 0.0,
+            count > 0 && dist != null ? dist / count : 0.0);
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("TRIP_QUERY")
+            .message(msg)
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "⚠️ View Alerts"))
+            .build();
+    }
+
+    /** OVERALL REPORT INTENT */
+    private ChatResponseDTO handleOverallReport(String sessionId, String normalized,
+                                               IntentClassifier.ClassifiedIntent classified,
+                                               Map<String, String> ctx) {
+        LocalDate now = LocalDate.now();
+        IntentClassifier.Period period = classified != null ? classified.getPeriod() : null;
+        DateRange dr = parseDateRange(normalized);
+        LocalDate from, to;
+        String intentName;
+        String periodLabel;
+
+        if (period == IntentClassifier.Period.DAILY || normalized.contains("today") || normalized.contains("daily")) {
+            from = now;
+            to = now;
+            intentName = "OVERALL_DAILY_REPORT";
+            periodLabel = "Today (" + now + ")";
+        } else if (period == IntentClassifier.Period.WEEKLY || normalized.contains("week")) {
+            if (normalized.contains("last week")) {
+                LocalDate end = now.with(TemporalAdjusters.previous(java.time.DayOfWeek.SUNDAY));
+                from = end.minusDays(6);
+                to = end;
+                periodLabel = "Last Week (" + from + " to " + to + ")";
+            } else {
+                from = now.with(TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+                to = now;
+                periodLabel = "This Week (" + from + " to " + to + ")";
+            }
+            intentName = "OVERALL_WEEKLY_REPORT";
+        } else if (period == IntentClassifier.Period.MONTHLY || normalized.contains("month")) {
+            YearMonth ym = extractYearMonth(normalized);
+            if (ym != null) {
+                from = ym.atDay(1);
+                to = ym.atEndOfMonth();
+                periodLabel = ym.getMonth().name() + " " + ym.getYear();
+            } else {
+                from = now.withDayOfMonth(1);
+                to = now;
+                periodLabel = "This Month (" + from + " to " + to + ")";
+            }
+            intentName = "OVERALL_MONTHLY_REPORT";
+        } else if (dr != null) {
+            from = dr.startDate;
+            to = dr.endDate;
+            intentName = "OVERALL_CUSTOM_REPORT";
+            periodLabel = dr.label;
+        } else {
+            from = now.withDayOfMonth(1);
+            to = now;
+            intentName = "OVERALL_MONTHLY_REPORT";
+            periodLabel = "Current Month (" + from + " to " + to + ")";
+        }
+
+        // If user explicitly asked for PDF report generation
+        if (normalized.contains("pdf") || normalized.contains("download") || normalized.contains("generate")) {
+            try {
+                ReportRequestDTO req = new ReportRequestDTO();
+                req.setReportType("MONTHLY");
+                req.setStartDate(from);
+                req.setEndDate(to);
+                ReportResponseDTO report = reportService.generateFleetReport(req);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent(intentName)
+                    .message(String.format("✅ **Overall Fleet Report (%s)** is ready!\n\nClick below to view or download the comprehensive fleet PDF report.", periodLabel))
+                    .reportId(report.getReportId())
+                    .pdfUrl(report.getPdfUrl())
+                    .downloadUrl(report.getDownloadUrl())
+                    .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "⚠️ View Alerts"))
+                    .build();
+            } catch (Exception e) {
+                log.warn("Error generating fleet PDF, falling back to summary", e);
+            }
+        }
+
+        LocalDateTime fromDt = from.atStartOfDay();
+        LocalDateTime toDt = to.plusDays(1).atStartOfDay();
+
+        long totalVehicles = vehicleRepository.count();
+        long activeVehicles = vehicleRepository.findByActiveTrue().size();
+        long entries = tripRepository.countDistinctVehiclesWithTripStarted(fromDt, toDt);
+        long exits = tripRepository.countDistinctVehiclesWithTripCompleted(fromDt, toDt);
+        long tripCount = tripRepository.countInDateRange(fromDt, toDt);
+        Double totalDistance = tripRepository.sumDistanceInDateRange(fromDt, toDt);
+        long totalAlerts = alertRepository.countInDateRange(fromDt, toDt);
+        long critAlerts = alertRepository.countBySeverityInDateRange("CRITICAL", fromDt, toDt);
+        long openAlerts = alertRepository.countOpenAlerts();
+
+        List<Object[]> alertTypes = alertRepository.countByTypeInDateRange(fromDt, toDt);
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("📊 **Overall Fleet Performance Report (%s)**\n\n", periodLabel));
+        sb.append(String.format("• **Vehicles Active:** %d / %d total vehicles\n", activeVehicles, totalVehicles));
+        sb.append(String.format("• **Vehicles Entered (Trips Started):** %,d\n", entries));
+        sb.append(String.format("• **Vehicles Exited (Trips Completed):** %,d\n", exits));
+        sb.append(String.format("• **Trips Completed:** %,d\n", tripCount));
+        sb.append(String.format("• **Total Distance Covered:** %,.1f km\n", totalDistance != null ? totalDistance : 0.0));
+        sb.append(String.format("• **Alerts Generated:** %,d (%,d critical, %,d open)\n\n", totalAlerts, critAlerts, openAlerts));
+
+        if (!alertTypes.isEmpty()) {
+            sb.append("⚠️ **Top Alert Types in Period:**\n");
+            for (Object[] r : alertTypes.stream().limit(4).collect(Collectors.toList())) {
+                sb.append(String.format("• %s: %,d\n", r[0], ((Number) r[1]).longValue()));
+            }
+            sb.append("\n");
+        }
+
+        List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
+        if (!rankings.isEmpty()) {
+            DriverRankingDTO topDriver = rankings.get(0);
+            sb.append(String.format("🏆 **Top Driver:** **%s (%s)** with a safety score of **%.1f / 100**.\n\n",
+                topDriver.getDriverName(), topDriver.getDriverCode(),
+                topDriver.getSafetyScore() != null ? topDriver.getSafetyScore().doubleValue() : 0.0));
+        }
+
+        sb.append("📄 *Would you like me to generate the official PDF report for this period?*");
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent(intentName)
+            .message(sb.toString())
+            .quickActions(List.of("📄 Generate Fleet PDF Report", "🏆 Safest Driver", "🚗 Vehicle Alerts", "📊 Fleet Summary"))
             .build();
     }
 
@@ -1214,20 +1999,21 @@ public class ChatService {
 
     /** Fallback when unknown */
     private ChatResponseDTO handleUnknownFallback(String sessionId) {
-        String msg = "I'm not quite sure how to answer that, but I can help you with:\n\n" +
-            "• **Fleet Overview**: *\"Give me today's fleet summary\"*\n" +
-            "• **Vehicles**: *\"Tell me about VH003\"* or *\"Which vehicle has the most alerts?\"*\n" +
-            "• **Drivers**: *\"Who is the safest driver?\"* or *\"Recommend 3 drivers\"*\n" +
-            "• **Driver Recommendations**: *\"Which driver is best for a long trip?\"* or *\"Who should I assign?\"*\n" +
-            "• **Alerts**: *\"Show overspeed alerts\"* or *\"Any GPS disconnects?\"*\n" +
-            "• **Reports**: *\"Generate fleet report for September 2026\"*\n\n" +
-            "What would you like to explore?";
+        String msg = "I can help with driver rankings, fleet summaries, trips, alerts, and daily/weekly/monthly reports. What would you like to know?\n\n" +
+            "Here are some examples of what you can ask:\n" +
+            "• **Fleet Overview**: *\"Give me today's fleet summary\"* or *\"How did the fleet perform today?\"*\n" +
+            "• **Drivers**: *\"Who is the safest driver?\"* or *\"Recommend 3 drivers for an important trip\"*\n" +
+            "• **Comparison**: *\"Compare Rohan and Deepak\"* or *\"Compare the top 5 drivers\"*\n" +
+            "• **Vehicles**: *\"Which vehicle has the most alerts?\"* or *\"Tell me about VH003\"*\n" +
+            "• **Trips**: *\"Show today's trips\"* or *\"Which driver completed the most trips?\"*\n" +
+            "• **Alerts**: *\"Show unresolved critical alerts\"* or *\"Which driver has the most violations?\"*\n" +
+            "• **Reports**: *\"Generate fleet report for September 2026\"* or *\"Rohan's September report\"*";
 
         return ChatResponseDTO.builder()
             .sessionId(sessionId)
             .intent("UNKNOWN")
             .message(msg)
-            .quickActions(List.of("📊 Fleet Summary", "🌟 Recommend Drivers", "🏆 Safest Driver", "⚠️ Top Alerts", "📄 Reports"))
+            .quickActions(List.of("📊 Fleet Summary", "🌟 Recommend Drivers", "🏆 Safest Driver", "⚠️ Top Alerts", "📄 Fleet Report"))
             .build();
     }
 

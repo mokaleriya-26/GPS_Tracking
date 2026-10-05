@@ -85,4 +85,16 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
 
     @Query("SELECT a.alertType, COUNT(a) FROM Alert a GROUP BY a.alertType ORDER BY COUNT(a) DESC")
     List<Object[]> countAllGroupedByType();
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = :severity")
+    long countBySeverity(String severity);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = :severity AND a.occurredAt BETWEEN :from AND :to")
+    long countBySeverityInDateRange(String severity, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = 'CRITICAL' AND a.status = 'OPEN'")
+    long countOpenCriticalAlerts();
+
+    @Query("SELECT a FROM Alert a WHERE a.severity = 'CRITICAL' AND a.status = 'OPEN' ORDER BY a.occurredAt DESC")
+    List<Alert> findOpenCriticalAlerts();
 }

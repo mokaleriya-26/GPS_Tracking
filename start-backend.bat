@@ -9,7 +9,7 @@ IF NOT DEFINED JAVA_HOME (
     )
 )
 
-IF NOT EXIST "backend-spring\target\tracking-app.jar" (
+IF NOT EXIST "backend-spring\target\tracking-1.0.0.jar" (
     echo [INFO] JAR not found. Building Spring Boot backend with Maven...
     cd backend-spring
     call mvn package -DskipTests
@@ -30,4 +30,4 @@ IF EXIST ".env" (
     )
 )
 
-java -jar backend-spring\target\tracking-app.jar
+java -jar backend-spring\target\tracking-1.0.0.jar
