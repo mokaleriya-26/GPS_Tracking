@@ -56,4 +56,16 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
 
     @Query("SELECT COUNT(t) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
     long countInDateRange(LocalDateTime from, LocalDateTime to);
+
+    @Query("""
+        SELECT t.vehicle.id, t.vehicle.code, t.vehicle.registrationNumber, COALESCE(SUM(t.distanceKm), 0), COUNT(t)
+        FROM Trip t
+        WHERE t.vehicle IS NOT NULL
+        GROUP BY t.vehicle.id, t.vehicle.code, t.vehicle.registrationNumber
+        ORDER BY SUM(t.distanceKm) DESC
+    """)
+    List<Object[]> findTopVehiclesByTotalDistance();
+
+    @Query("SELECT t FROM Trip t WHERE t.distanceKm IS NOT NULL ORDER BY t.distanceKm DESC")
+    List<Trip> findLongestTrip();
 }

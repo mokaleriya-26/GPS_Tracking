@@ -97,4 +97,7 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
 
     @Query("SELECT a FROM Alert a WHERE a.severity = 'CRITICAL' AND a.status = 'OPEN' ORDER BY a.occurredAt DESC")
     List<Alert> findOpenCriticalAlerts();
+
+    @Query(value = "SELECT CAST(occurred_at AS DATE) as alert_date, COUNT(*) as alert_count FROM alerts GROUP BY CAST(occurred_at AS DATE) ORDER BY alert_count DESC LIMIT 1", nativeQuery = true)
+    List<Object[]> findDayWithMostAlerts();
 }
