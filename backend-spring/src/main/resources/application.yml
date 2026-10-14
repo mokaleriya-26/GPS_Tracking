@@ -121,13 +121,21 @@ notification:
     manager-phone: ${MANAGER_PHONE:}
 
 # ============================================================
-# PYTHON AI SERVICE
+# AI & LLM CONFIGURATION
 # ============================================================
 ai:
   service:
     url: ${PYTHON_AI_SERVICE_URL:http://localhost:8000}
     timeout: 30
     enabled: true
+  llm:
+    enabled: ${LLM_ENABLED:false}
+    provider: ${LLM_PROVIDER:openai} # openai, anthropic, or gemini
+    api-key: ${LLM_API_KEY:}
+    api-url: ${LLM_API_URL:https://api.openai.com/v1/chat/completions}
+    model: ${LLM_MODEL:gpt-4o-mini}
+    temperature: ${LLM_TEMPERATURE:0.2}
+    timeout: ${LLM_TIMEOUT_SECONDS:15}
 
 # ============================================================
 # REPORT GENERATION

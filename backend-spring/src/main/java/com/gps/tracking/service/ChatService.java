@@ -43,6 +43,7 @@ public class ChatService {
     private final TelemetryRepository telemetryRepository;
     private final ReportService reportService;
     private final IntentClassifier intentClassifier;
+    private final LlmService llmService;
 
     // In-memory session context for multi-turn dialogue
     private final Map<String, Map<String, String>> sessionContext = new HashMap<>();
@@ -122,15 +123,80 @@ public class ChatService {
         }
 
         // =========================================================
-        // 2. INTENT CLASSIFICATION VIA NLP ENGINE
+        // 1.5. CONVERSATIONAL FOLLOW-UP UNDERSTANDING ("What about yesterday?", "Generate a report for that")
         // =========================================================
-        IntentClassifier.ClassifiedIntent classified = intentClassifier.classify(message);
+        if (normalized.matches(".*(what about|how about|and what about)\\s+(yesterday|today|last week|this week|this month|last month).*")) {
+            DateRange dr = parseDateRange(normalized);
+            if (dr != null) {
+                String lastSubject = ctx.get("last_subject");
+                if ("VEHICLE".equals(lastSubject) && ctx.containsKey("last_vehicle_id")) {
+                    return handleVehicleAlertAnalysis(sessionId, normalized, ctx);
+                } else if ("DRIVER".equals(lastSubject) && ctx.containsKey("last_driver_id")) {
+                    return handleDriverStats(sessionId, normalized, ctx);
+                } else {
+                    return handleFleetSummary(sessionId, normalized, ctx);
+                }
+            }
+        }
+        if (normalized.matches(".*(generate|create|download|make)\\s+(a\\s+)?report\\s+(for\\s+)?(that|it|this).*")) {
+            String lastSubject = ctx.get("last_subject");
+            if ("VEHICLE".equals(lastSubject) && ctx.containsKey("last_vehicle_id")) {
+                return handleVehicleReportIntent(sessionId, normalized, message, ctx);
+            } else if ("DRIVER".equals(lastSubject) && ctx.containsKey("last_driver_id")) {
+                return handleDriverReportIntent(sessionId, normalized, message, ctx);
+            } else {
+                return handleFleetReport(sessionId, normalized, ctx);
+            }
+        }
+
+        // =========================================================
+        // 2. OPTIONAL LLM ANALYSIS (If enabled via config / API key)
+        // =========================================================
+        IntentClassifier.ClassifiedIntent classified = null;
+        if (llmService.isLlmEnabled()) {
+            Optional<com.gps.tracking.dto.LlmIntentResponseDTO> llmResult = llmService.analyzeMessage(message, ctx);
+            if (llmResult.isPresent()) {
+                com.gps.tracking.dto.LlmIntentResponseDTO res = llmResult.get();
+                if (res.getConversationalResponse() != null && !res.getConversationalResponse().isBlank() &&
+                    ("SMALL_TALK".equalsIgnoreCase(res.getIntent()) || "GREETING".equalsIgnoreCase(res.getIntent()) ||
+                     "CAPABILITIES".equalsIgnoreCase(res.getIntent()) || "EXPLANATION".equalsIgnoreCase(res.getIntent()) ||
+                     "CLARIFICATION_NEEDED".equalsIgnoreCase(res.getIntent()))) {
+                    return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .intent(res.getIntent().toUpperCase())
+                        .message(res.getConversationalResponse())
+                        .quickActions(res.getQuickActions() != null && !res.getQuickActions().isEmpty()
+                            ? res.getQuickActions()
+                            : List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers", "⚠️ Top Alerts"))
+                        .build();
+                }
+
+                // If LLM recognized a structured fleet intent, bridge it to a ClassifiedIntent
+                classified = mapLlmResponseToClassifiedIntent(res);
+            }
+        }
+
+        // =========================================================
+        // 3. INTENT CLASSIFICATION VIA NLP ENGINE (Fallback or Primary)
+        // =========================================================
+        if (classified == null || classified.getIntent() == IntentClassifier.Intent.UNKNOWN) {
+            classified = intentClassifier.classify(message);
+        }
         IntentClassifier.Intent intent = classified.getIntent();
         log.info("Classified intent: {} (score={}) for msg: {}", intent, classified.getScore(), message);
 
         switch (intent) {
             case GREETING:
                 return handleGreetingOrHelp(sessionId);
+
+            case SMALL_TALK:
+                return handleSmallTalk(sessionId, normalized);
+
+            case CAPABILITIES:
+                return handleCapabilities(sessionId);
+
+            case EXPLANATION:
+                return handleExplanation(sessionId, normalized, ctx);
 
             case COMPARE_DRIVERS:
                 return handleCompareDrivers(sessionId, normalized, classified, ctx);
@@ -210,6 +276,78 @@ public class ChatService {
             .intent("GREETING")
             .message(msg)
             .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers", "🚗 Vehicles", "⚠️ Top Alerts", "📄 Reports"))
+            .build();
+    }
+
+    /** Casual / Small Talk Handler */
+    private ChatResponseDTO handleSmallTalk(String sessionId, String normalized) {
+        String reply;
+        if (normalized.contains("how are you") || normalized.contains("how r u") || normalized.contains("how are u") || normalized.contains("how's it going")) {
+            reply = "😊 **I'm doing great, thank you!** All fleet telemetry systems, vehicle tracking feeds, and driver databases are online and operating smoothly.\n\nHow can I help you manage your fleet today?";
+        } else if (normalized.contains("thanks") || normalized.contains("thank") || normalized.contains("thx") || normalized.contains("appreciate")) {
+            reply = "🙏 **You're very welcome!** Always happy to help keep your fleet running safely and efficiently. Let me know if you need any more stats, driver recommendations, or reports!";
+        } else if (normalized.contains("good job") || normalized.contains("great job") || normalized.contains("nice work") || normalized.contains("cool")) {
+            reply = "🚀 **Thank you!** I strive to deliver accurate, real-time insights for your fleet operations. What would you like to explore next?";
+        } else {
+            reply = "🤖 I'm your AI Fleet Assistant, connected directly to your vehicles and drivers. Let me know whatever you need!";
+        }
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("SMALL_TALK")
+            .message(reply)
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers", "⚠️ Top Alerts"))
+            .build();
+    }
+
+    /** Capabilities Handler */
+    private ChatResponseDTO handleCapabilities(String sessionId) {
+        String msg = "🛠️ **Here is what I can do for you:**\n\n" +
+            "• **📊 Fleet Overview:** Real-time active vehicle counts, trip distances, entry/exit numbers, and open alerts.\n" +
+            "• **🏆 Driver Rankings & Safety:** Identify the safest or riskiest drivers, view safety scores (0-100), and inspect driver profiles.\n" +
+            "• **🌟 Smart Driver Recommendations:** Suggest the best drivers for urgent, long-distance, or high-value assignments based on real driving history.\n" +
+            "• **⚖️ Driver Comparison:** Compare safety scores, trip counts, and violation rates between two drivers side-by-side.\n" +
+            "• **🚗 Vehicle Diagnostics:** Check vehicle registration, make/model, fuel capacity, current driver, and top speed.\n" +
+            "• **⚠️ Alert Analytics:** Analyze overspeed events, harsh braking, GPS disconnects, and night driving violations.\n" +
+            "• **🛣️ Trip Activity:** Look up total distance, longest trips, and completed routes for any period.\n" +
+            "• **📄 PDF Reports:** Generate and download official monthly and periodic fleet/driver reports on demand.";
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("CAPABILITIES")
+            .message(msg)
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers", "🚗 VH001 Details", "📄 Generate Report"))
+            .build();
+    }
+
+    /** Simple Explanation Handler */
+    private ChatResponseDTO handleExplanation(String sessionId, String normalized, Map<String, String> ctx) {
+        String msg;
+        String lastSubject = ctx.get("last_subject");
+
+        if ("DRIVER".equals(lastSubject) && ctx.containsKey("last_driver_name")) {
+            String driverName = ctx.get("last_driver_name");
+            msg = String.format("💡 **In simple terms for %s:**\n\n" +
+                "The safety score starts at **100 points**. Points are deducted for risky events:\n" +
+                "• **-5 pts** for each Overspeeding incident\n" +
+                "• **-4 pts** for each Harsh Braking event\n" +
+                "• **-4 pts** for each Harsh Acceleration\n" +
+                "• **-8 pts** for Fatigue events\n" +
+                "• **+1 bonus pt** for each trip completed without any incidents.\n\n" +
+                "Higher scores mean safer driving and lower accident risk.", driverName);
+        } else {
+            msg = "💡 **How the Fleet System Works Simply:**\n\n" +
+                "• **GPS Trackers** on each vehicle send speed, ignition, and location updates every few seconds.\n" +
+                "• If a driver speeds or brakes harshly, the system records an **Alert** instantly.\n" +
+                "• Clean trips raise driver safety scores; violations lower them.\n" +
+                "• All metrics are stored securely in PostgreSQL so you can inspect live fleet health at any time.";
+        }
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("EXPLANATION")
+            .message(msg)
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "🌟 Recommend Drivers"))
             .build();
     }
 
@@ -2175,5 +2313,54 @@ public class ChatService {
             }
         }
         return null;
+    }
+
+    /** Map structured LLM response to ClassifiedIntent with validated types */
+    private IntentClassifier.ClassifiedIntent mapLlmResponseToClassifiedIntent(com.gps.tracking.dto.LlmIntentResponseDTO res) {
+        if (res == null || res.getIntent() == null) return null;
+        try {
+            IntentClassifier.Intent intent = IntentClassifier.Intent.valueOf(res.getIntent().toUpperCase().trim());
+            IntentClassifier.Scope scope = IntentClassifier.Scope.UNKNOWN;
+            if (res.getScope() != null) {
+                try {
+                    scope = IntentClassifier.Scope.valueOf(res.getScope().toUpperCase().trim());
+                } catch (IllegalArgumentException ignored) {}
+            }
+
+            IntentClassifier.Period period = null;
+            if (res.getPeriod() != null) {
+                try {
+                    period = IntentClassifier.Period.valueOf(res.getPeriod().toUpperCase().trim());
+                } catch (IllegalArgumentException ignored) {}
+            }
+
+            LocalDate dateFrom = null;
+            if (res.getDateFrom() != null && !res.getDateFrom().isBlank()) {
+                try { dateFrom = LocalDate.parse(res.getDateFrom().trim()); } catch (Exception ignored) {}
+            }
+            LocalDate dateTo = null;
+            if (res.getDateTo() != null && !res.getDateTo().isBlank()) {
+                try { dateTo = LocalDate.parse(res.getDateTo().trim()); } catch (Exception ignored) {}
+            }
+
+            YearMonth yearMonth = null;
+            if (res.getYearMonth() != null && !res.getYearMonth().isBlank()) {
+                try { yearMonth = YearMonth.parse(res.getYearMonth().trim()); } catch (Exception ignored) {}
+            }
+
+            int limit = (res.getLimit() != null && res.getLimit() > 0) ? res.getLimit() : 5;
+
+            return new IntentClassifier.ClassifiedIntent(
+                intent, scope, period,
+                res.getDriverCode(), res.getDriverName(),
+                res.getVehicleCode(), res.getVehicleRegistration(),
+                res.getAlertType(),
+                dateFrom, dateTo, yearMonth,
+                limit, 10.0
+            );
+        } catch (IllegalArgumentException ex) {
+            log.debug("LLM suggested intent '{}' is not recognized in local enum: {}", res.getIntent(), ex.getMessage());
+            return null;
+        }
     }
 }

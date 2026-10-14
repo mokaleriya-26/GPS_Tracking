@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageCircle, X, Send, Bot, User, FileText, Download, ExternalLink, RefreshCw, Zap } from 'lucide-react';
+import { MessageCircle, X, Send, Bot, User, FileText, Download, ExternalLink, RefreshCw, Zap, Mic, MicOff, AlertCircle } from 'lucide-react';
 import { sendChatMessage, clearSession } from '../api/chat';
+import { useSpeechRecognition } from './useSpeechRecognition';
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
@@ -159,19 +160,50 @@ export default function ChatbotWidget() {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
+  // Voice Speech Recognition Hook
+  const {
+    isListening,
+    interimText,
+    error: speechError,
+    setError: setSpeechError,
+    isSupported: isSpeechSupported,
+    toggleListening,
+    stopListening
+  } = useSpeechRecognition({
+    lang: 'en-IN',
+    onTranscript: (finalText) => {
+      setInput(finalText);
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.selectionStart = inputRef.current.value.length;
+          inputRef.current.selectionEnd = inputRef.current.value.length;
+        }
+      }, 50);
+    }
+  });
+
   useEffect(() => {
-    if (open) { setUnread(0); setError(null); setTimeout(() => inputRef.current?.focus(), 120); }
-  }, [open]);
+    if (open) {
+      setUnread(0);
+      setError(null);
+      setTimeout(() => inputRef.current?.focus(), 120);
+    } else {
+      stopListening();
+    }
+  }, [open, stopListening]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
   const sendMsg = async (text) => {
+    stopListening();
     const msg = (text || input).trim();
     if (!msg || loading) return;
     setInput('');
     setError(null);
+    setSpeechError(null);
     setMessages(prev => [...prev, { role: 'user', text: msg, ts: new Date() }]);
     setLoading(true);
 
@@ -401,9 +433,63 @@ export default function ChatbotWidget() {
             <div ref={bottomRef} />
           </div>
 
+          {/* Speech / Error feedback banner */}
+          {speechError && (
+            <div style={{
+              padding: '6px 12px', background: '#fef2f2', borderTop: '1px solid #fecaca',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, color: '#dc2626', flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                <AlertCircle size={13} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {speechError}
+                </span>
+              </div>
+              <button
+                onClick={() => setSpeechError(null)}
+                style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', padding: 2, display: 'flex' }}
+                title="Dismiss"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
+          {/* Listening Live Indicator banner */}
+          {isListening && (
+            <div style={{
+              padding: '6px 14px', background: '#eff6ff', borderTop: '1px solid #bfdbfe',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, color: '#1e40af', flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', background: '#ef4444',
+                  animation: 'micDotPulse 1s infinite'
+                }} />
+                <span style={{ fontWeight: 600 }}>Listening...</span>
+                {interimText && (
+                  <span style={{ fontStyle: 'italic', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    "{interimText}"
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={stopListening}
+                style={{
+                  background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 4,
+                  color: '#1e40af', cursor: 'pointer', padding: '2px 6px', fontSize: 10, fontWeight: 600
+                }}
+              >
+                Done
+              </button>
+            </div>
+          )}
+
           {/* Input bar */}
           <div style={{
-            padding: '10px 14px', borderTop: '1px solid #e2e8f0', background: '#fff',
+            padding: '10px 14px', borderTop: speechError || isListening ? 'none' : '1px solid #e2e8f0', background: '#fff',
             display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0
           }}>
             <textarea
@@ -412,19 +498,52 @@ export default function ChatbotWidget() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder="Ask about drivers, alerts, vehicles, reports…"
+              placeholder={isListening ? "Listening... Speak now" : "Ask about drivers, alerts, vehicles, reports…"}
               rows={1}
               disabled={loading}
               style={{
-                flex: 1, resize: 'none', border: '1.5px solid #e2e8f0',
+                flex: 1, resize: 'none', border: isListening ? '1.5px solid #ef4444' : '1.5px solid #e2e8f0',
                 borderRadius: 10, padding: '8px 12px', fontSize: 13,
                 fontFamily: 'inherit', outline: 'none', lineHeight: 1.4,
-                maxHeight: 80, overflowY: 'auto', background: '#f8fafc',
-                transition: 'border-color .2s'
+                maxHeight: 80, overflowY: 'auto', background: isListening ? '#fff5f5' : '#f8fafc',
+                transition: 'border-color .2s, background .2s'
               }}
-              onFocus={e => e.target.style.borderColor = '#2563eb'}
-              onBlur={e => e.target.style.borderColor = '#e2e8f0'}
+              onFocus={e => e.target.style.borderColor = isListening ? '#ef4444' : '#2563eb'}
+              onBlur={e => e.target.style.borderColor = isListening ? '#ef4444' : '#e2e8f0'}
             />
+
+            {/* Microphone Button */}
+            <button
+              id="chatbot-mic-btn"
+              type="button"
+              onClick={() => toggleListening(input)}
+              disabled={loading}
+              title={
+                !isSpeechSupported
+                  ? 'Voice input not supported in this browser'
+                  : isListening
+                  ? 'Stop listening'
+                  : 'Speak query (en-IN)'
+              }
+              style={{
+                width: 38, height: 38, borderRadius: '50%', border: 'none',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                background: isListening
+                  ? '#ef4444'
+                  : isSpeechSupported
+                  ? '#eff6ff'
+                  : '#f1f5f9',
+                color: isListening ? '#fff' : isSpeechSupported ? '#2563eb' : '#94a3b8',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'all .2s', flexShrink: 0,
+                boxShadow: isListening ? '0 0 0 4px rgba(239, 68, 68, 0.25)' : 'none',
+                animation: isListening ? 'micPulse 1.4s infinite' : 'none'
+              }}
+            >
+              {isListening ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
+
+            {/* Send Button */}
             <button
               id="chatbot-send-btn"
               onClick={() => sendMsg()}
@@ -447,6 +566,15 @@ export default function ChatbotWidget() {
         @keyframes chatPulse {
           0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
           40%            { transform: scale(1);   opacity: 1; }
+        }
+        @keyframes micPulse {
+          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+          70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        @keyframes micDotPulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.3); opacity: 0.6; }
         }
       `}</style>
     </>

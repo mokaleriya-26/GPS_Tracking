@@ -15,6 +15,22 @@ class IntentClassifierTest {
     }
 
     @Test
+    void testConversationalAndGeneralQueries() {
+        assertIntent("hii", IntentClassifier.Intent.GREETING);
+        assertIntent("hello assistant", IntentClassifier.Intent.GREETING);
+        assertIntent("hey there!", IntentClassifier.Intent.GREETING);
+        assertIntent("how are you?", IntentClassifier.Intent.SMALL_TALK);
+        assertIntent("how are you doing", IntentClassifier.Intent.SMALL_TALK);
+        assertIntent("thanks bro", IntentClassifier.Intent.SMALL_TALK);
+        assertIntent("thank you", IntentClassifier.Intent.SMALL_TALK);
+        assertIntent("what can you do?", IntentClassifier.Intent.CAPABILITIES);
+        assertIntent("what are your features", IntentClassifier.Intent.CAPABILITIES);
+        assertIntent("how can you help me", IntentClassifier.Intent.CAPABILITIES);
+        assertIntent("explain that simply", IntentClassifier.Intent.EXPLANATION);
+        assertIntent("explain in simple terms", IntentClassifier.Intent.EXPLANATION);
+    }
+
+    @Test
     void testDriverRankingQueries() {
         assertIntent("Who is safest?", IntentClassifier.Intent.DRIVER_RANKING);
         assertIntent("Who is the safest driver?", IntentClassifier.Intent.DRIVER_RANKING);
@@ -31,6 +47,10 @@ class IntentClassifierTest {
         assertIntent("Who needs improvement?", IntentClassifier.Intent.DRIVER_RANKING);
         assertIntent("Which driver has the cleanest record?", IntentClassifier.Intent.DRIVER_RANKING);
         assertIntent("Who has the fewest alerts?", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("Show me the riskiest drivers.", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("Which drivers are performing badly?", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("Who has the most driving violations?", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("Tell me which drivers need attention.", IntentClassifier.Intent.DRIVER_RANKING);
     }
 
     @Test
@@ -164,6 +184,27 @@ class IntentClassifierTest {
         assertIntent("Give me today's operational summary", IntentClassifier.Intent.FLEET_SUMMARY);
         assertIntent("Give me a fleet health summary", IntentClassifier.Intent.FLEET_SUMMARY);
         assertIntent("Give me a complete management summary", IntentClassifier.Intent.FLEET_SUMMARY);
+    }
+
+    @Test
+    void testTypoAndMisspellingQueries() {
+        // Spelling mistakes and informal abbreviations handled by normalizer
+        assertIntent("Show me the saftest drver", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("Which drvers are riskist?", IntentClassifier.Intent.DRIVER_RANKING);
+        assertIntent("recommed 3 drivrs", IntentClassifier.Intent.DRIVER_RECOMMENDATION);
+        assertIntent("Gimme 2day fleet sumary", IntentClassifier.Intent.FLEET_SUMMARY);
+        assertIntent("Show overspeeding alrts", IntentClassifier.Intent.ALERT_QUERY);
+        assertIntent("Show allert for vechile VH003", IntentClassifier.Intent.VEHICLE_ALERT_ANALYSIS);
+        assertIntent("wat can u do?", IntentClassifier.Intent.CAPABILITIES);
+        assertIntent("thx bro", IntentClassifier.Intent.SMALL_TALK);
+        assertIntent("compr Rohan and Deepak", IntentClassifier.Intent.COMPARE_DRIVERS);
+    }
+
+    @Test
+    void testUnknownRequests() {
+        assertIntent("book a flight ticket to London", IntentClassifier.Intent.UNKNOWN);
+        assertIntent("order a pizza for dinner", IntentClassifier.Intent.UNKNOWN);
+        assertIntent("what is the capital of France?", IntentClassifier.Intent.UNKNOWN);
     }
 
     private void assertIntent(String message, IntentClassifier.Intent expected) {

@@ -43,6 +43,9 @@ public class IntentClassifier {
     // =====================================================================
     public enum Intent {
         GREETING,
+        SMALL_TALK,
+        CAPABILITIES,
+        EXPLANATION,
         FLEET_SUMMARY,
         DRIVER_RANKING,
         DRIVER_RECOMMENDATION,
@@ -152,10 +155,29 @@ public class IntentClassifier {
         }
 
         String lower = rawMessage.toLowerCase().trim();
+        lower = normalizeSpellingAndTypos(lower);
 
-        // Greeting short-circuit
-        if (lower.matches("^(hi|hello|hey|help|howdy|good\\s+(morning|afternoon|evening))$")) {
+        // 1. Natural Greeting matching (e.g. "hii", "hello", "hey there", "good morning")
+        if (lower.matches("^(h+i+|h+e+y+|hello+|howdy|greetings|good\\s*(morning|afternoon|evening)|namaste)(\\s+(there|assistant|bot|bro|buddy))?[!.]*$")) {
             return makeResult(Intent.GREETING, Scope.UNKNOWN, null, null, null, null, null, null, null, null, null, 5, 10.0);
+        }
+
+        // 2. Casual / Small Talk (e.g. "how are you", "how are you doing", "thanks bro", "thank you", "nice work", "who made you")
+        if (lower.matches(".*\\b(how are you|how r u|how are u|how are you doing|how is it going|how's it going)\\b.*") ||
+            lower.matches(".*\\b(thanks|thank you|thx|tq|appreciate it|great job|good job|nice work|cool bro|thanks bro)\\b.*") ||
+            lower.matches(".*\\b(are you a bot|are you human|who created you|who made you)\\b.*")) {
+            return makeResult(Intent.SMALL_TALK, Scope.UNKNOWN, null, null, null, null, null, null, null, null, null, 5, 10.0);
+        }
+
+        // 3. Capabilities / Help (e.g. "what can you do", "what are your features", "how can you help me", "show help", "menu")
+        if (lower.matches(".*\\b(what can you do|what do you do|what are your capabilities|what are your features|how can you help|help me|what should i ask|show commands|show help)\\b.*") ||
+            lower.equals("help") || lower.equals("capabilities") || lower.equals("features")) {
+            return makeResult(Intent.CAPABILITIES, Scope.UNKNOWN, null, null, null, null, null, null, null, null, null, 5, 10.0);
+        }
+
+        // 4. Requests for Explanation / Clarification (e.g. "explain that simply", "explain simply", "what does that mean", "explain safety score")
+        if (lower.matches(".*\\b(explain that simply|explain simply|explain in simple terms|break that down|what does that mean|explain it to me)\\b.*")) {
+            return makeResult(Intent.EXPLANATION, Scope.UNKNOWN, null, null, null, null, null, null, null, null, null, 5, 10.0);
         }
 
         // ---- Extract entities first ----------------------------------------
@@ -262,12 +284,16 @@ public class IntentClassifier {
             scores.put(Intent.COMPARE_DRIVERS, 30.0);
         }
 
-        // 6. Driver ranking queries
+        // 6. Driver ranking queries (best, safest, or worst, riskiest, violations)
         if (lower.contains("who is safest") || lower.contains("who is the safest") || lower.contains("which driver is safest") ||
             lower.contains("who has the best safety") || lower.contains("who has the highest safety") ||
             lower.contains("lowest risk") || lower.contains("cleanest record") ||
             lower.contains("rank drivers") || lower.contains("rank the drivers") || lower.contains("rank all drivers") ||
             lower.contains("give me driver rankings") || lower.contains("driver rankings") ||
+            lower.contains("riskiest driver") || lower.contains("riskiest drivers") || lower.contains("riskiest") ||
+            lower.contains("performing badly") || lower.contains("performing poorly") || lower.contains("bad drivers") ||
+            lower.contains("most driving violations") || lower.contains("most violations") ||
+            lower.contains("drivers need attention") || lower.contains("driver needs attention") ||
             lower.contains("who has the lowest safety") || lower.contains("which drivers are risky") ||
             lower.contains("who needs improvement") || lower.contains("who should i avoid assigning") ||
             lower.contains("fewest alerts") || lower.contains("fewest violations") ||
@@ -648,7 +674,7 @@ public class IntentClassifier {
         Set<String> stopWords = Set.of(
             "show", "give", "tell", "what", "when", "where", "which", "who", "whom", "whose",
             "this", "that", "from", "have", "with", "does", "been", "more", "most", "many",
-            "safe", "safest", "best", "good", "better", "cleanest", "worst", "risky",
+            "safe", "safest", "best", "good", "better", "cleanest", "worst", "risky", "risk", "riskiest", "badly", "attention",
             "how", "the", "and", "for", "are", "were", "was", "will", "would", "could", "should",
             "report", "reports", "fleet", "trip", "trips", "alert", "alerts", "week", "month",
             "daily", "weekly", "monthly", "today", "yesterday", "driver", "drivers", "vehicle", "vehicles",
@@ -694,6 +720,48 @@ public class IntentClassifier {
     private Integer parseMonthName(String name) {
         if (name == null) return null;
         return MONTH_NAMES.get(name.toLowerCase());
+    }
+
+    /**
+     * Normalizes common conversational spelling mistakes, typos, slang, and phonetic variations.
+     */
+     public String normalizeSpellingAndTypos(String text) {
+        if (text == null) return "";
+        String s = " " + text.toLowerCase().trim() + " ";
+
+        // Common typos in fleet terms
+        s = s.replaceAll("\\b(vechile|vechiles|vehical|vehicals|vehicls|vehecle|vhicle|vheicle)\\b", "vehicle");
+        s = s.replaceAll("\\b(drvers|dirvers|drivres)\\b", "drivers");
+        s = s.replaceAll("\\b(drver|drivr|dirver|dreiver)\\b", "driver");
+        s = s.replaceAll("\\b(recommed|recomnd|recommand|recomended|reccomend|recomende|recomends)\\b", "recommend");
+        s = s.replaceAll("\\b(recomendation|reccomendation|recommandation)\\b", "recommendation");
+        s = s.replaceAll("\\b(sumary|sumry|sumarry|summarry)\\b", "summary");
+        s = s.replaceAll("\\b(alrt|alrts|allert|allerts|aelrt|alart)\\b", "alert");
+        s = s.replaceAll("\\b(vilations|violationes|violatons|violtion|violatn)\\b", "violations");
+        s = s.replaceAll("\\b(trp|trps|tripps|tirp)\\b", "trip");
+        s = s.replaceAll("\\b(repord|reprt|reprot|repot|rport)\\b", "report");
+        s = s.replaceAll("\\b(saftest|safestt|safste|safeest)\\b", "safest");
+        s = s.replaceAll("\\b(riskist|riskey|riskiestt|riski|riskeist)\\b", "riskiest");
+        s = s.replaceAll("\\b(overspeeding|overspeeded|ovrspeed|overspeedd)\\b", "overspeed");
+        s = s.replaceAll("\\b(brakng|breakin|breakng|brakeing|brakign)\\b", "braking");
+        s = s.replaceAll("\\b(performng|perfromance|performence|preformance)\\b", "performance");
+        s = s.replaceAll("\\b(yestarday|yesterdy|yestrday)\\b", "yesterday");
+        s = s.replaceAll("\\b(tday|todday|2day)\\b", "today");
+        s = s.replaceAll("\\b(compr|comapre|compair|compar)\\b", "compare");
+
+        // Common conversational contractions / slang
+        s = s.replaceAll("\\b(pls|plz)\\b", "please");
+        s = s.replaceAll("\\b(thx|tq|thnx|thanx)\\b", "thanks");
+        s = s.replaceAll("\\b(u)\\b", "you");
+        s = s.replaceAll("\\b(r)\\b", "are");
+        s = s.replaceAll("\\b(ur)\\b", "your");
+        s = s.replaceAll("\\b(wat|wht)\\b", "what");
+        s = s.replaceAll("\\b(abt)\\b", "about");
+        s = s.replaceAll("\\b(tellme)\\b", "tell me");
+        s = s.replaceAll("\\b(showme)\\b", "show me");
+        s = s.replaceAll("\\b(gimme)\\b", "give me");
+
+        return s.trim();
     }
 
     private ClassifiedIntent makeResult(Intent intent, Scope scope, Period period,
