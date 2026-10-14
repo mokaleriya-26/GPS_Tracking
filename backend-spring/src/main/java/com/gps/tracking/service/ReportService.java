@@ -1,16 +1,22 @@
 package com.gps.tracking.service;
 
-import com.gps.tracking.dto.ReportRequestDTO;
-import com.gps.tracking.dto.ReportResponseDTO;
+import com.gps.tracking.dto.*;
 import com.gps.tracking.entity.*;
 import com.gps.tracking.repository.*;
 import com.itextpdf.kernel.colors.ColorConstants;
 import com.itextpdf.kernel.colors.DeviceRgb;
-import com.itextpdf.kernel.font.PdfFontFactory;
+import com.itextpdf.kernel.events.Event;
+import com.itextpdf.kernel.events.IEventHandler;
+import com.itextpdf.kernel.events.PdfDocumentEvent;
 import com.itextpdf.kernel.geom.PageSize;
+import com.itextpdf.kernel.geom.Rectangle;
 import com.itextpdf.kernel.pdf.PdfDocument;
+import com.itextpdf.kernel.pdf.PdfPage;
 import com.itextpdf.kernel.pdf.PdfWriter;
+import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
+import com.itextpdf.layout.Canvas;
 import com.itextpdf.layout.Document;
+import com.itextpdf.layout.borders.SolidBorder;
 import com.itextpdf.layout.element.Cell;
 import com.itextpdf.layout.element.Paragraph;
 import com.itextpdf.layout.element.Table;
@@ -26,9 +32,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.IsoFields;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -37,336 +46,1126 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ReportService {
 
+    public static final ZoneId ASIA_KOLKATA = ZoneId.of("Asia/Kolkata");
+
     private final DriverRepository driverRepository;
     private final VehicleRepository vehicleRepository;
     private final TripRepository tripRepository;
     private final AlertRepository alertRepository;
     private final DriverDailyStatsRepository statsRepository;
+    private final SafetyScoreService safetyScoreService;
 
     @Value("${reports.output-dir:./reports/generated}")
     private String reportsOutputDir;
 
-    private static final DeviceRgb PRIMARY_BLUE = new DeviceRgb(37, 99, 235);
-    private static final DeviceRgb HEADER_DARK  = new DeviceRgb(15, 23, 42);
-    private static final DeviceRgb LIGHT_GRAY   = new DeviceRgb(248, 250, 252);
-    private static final DeviceRgb TEXT_MUTED   = new DeviceRgb(100, 116, 139);
-    private static final DeviceRgb SUCCESS_GREEN= new DeviceRgb(22, 163, 74);
-    private static final DeviceRgb DANGER_RED   = new DeviceRgb(220, 38, 38);
-    private static final DeviceRgb WARNING_AMBER= new DeviceRgb(217, 119, 6);
+    // Corporate Color Palette
+    private static final DeviceRgb PRIMARY_BLUE = new DeviceRgb(30, 64, 175);   // #1E40AF Royal Blue
+    private static final DeviceRgb HEADER_DARK  = new DeviceRgb(15, 23, 42);   // #0F172A Slate-900
+    private static final DeviceRgb ACCENT_BLUE  = new DeviceRgb(37, 99, 235);  // #2563EB Blue
+    private static final DeviceRgb TABLE_HEADER = new DeviceRgb(30, 58, 138);  // #1E3A8A Dark Navy
+    private static final DeviceRgb ROW_EVEN     = new DeviceRgb(248, 250, 252);// #F8FAFC
+    private static final DeviceRgb ROW_ODD      = new DeviceRgb(255, 255, 255);// #FFFFFF
+    private static final DeviceRgb BORDER_COLOR = new DeviceRgb(226, 232, 240);// #E2E8F0
+    private static final DeviceRgb TEXT_PRIMARY = new DeviceRgb(15, 23, 42);   // #0F172A
+    private static final DeviceRgb TEXT_MUTED   = new DeviceRgb(100, 116, 139);// #64748B
+    private static final DeviceRgb SUCCESS_GREEN= new DeviceRgb(22, 163, 74);  // #16A34A
+    private static final DeviceRgb DANGER_RED   = new DeviceRgb(220, 38, 38);  // #DC2626
+    private static final DeviceRgb WARNING_AMBER= new DeviceRgb(217, 119, 6);  // #D97706
 
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd MMM yyyy");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter GEN_FMT  = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm:ss");
+
+    // ==================================================================
+    // 1. DRIVER REPORT GENERATION (All 4 Combinations)
+    // ==================================================================
     public ReportResponseDTO generateDriverReport(ReportRequestDTO req) {
         Driver driver = req.getDriverId() != null
-            ? driverRepository.findById(req.getDriverId()).orElseThrow()
-            : driverRepository.findByCode(req.getDriverCode()).orElseThrow();
+                ? driverRepository.findById(req.getDriverId()).orElseThrow()
+                : driverRepository.findByCode(req.getDriverCode()).orElseThrow();
 
         LocalDate startDate = resolveStartDate(req);
         LocalDate endDate   = resolveEndDate(req, startDate);
 
-        String reportId = "DRVRPT_" + driver.getCode() + "_" + startDate + "_" + UUID.randomUUID().toString().substring(0, 6);
+        // Half-open interval in Asia/Kolkata: [from, to)
+        LocalDateTime from = startDate.atStartOfDay();
+        LocalDateTime to   = endDate.plusDays(1).atStartOfDay();
+
+        String rType = req.getReportType() != null ? req.getReportType().toUpperCase() : "MONTHLY";
+
+        // 1. Retrieve all trips and alerts for this driver in the half-open date range
+        List<Trip> trips = tripRepository.findTripsByDriverAndDateRange(driver.getId(), from, to);
+        List<Alert> alerts = alertRepository.findAlertsByDriverAndDateRange(driver.getId(), from, to);
+        List<DriverDailyStats> statsList = statsRepository
+                .findByDriverIdAndStatDateBetweenOrderByStatDateAsc(driver.getId(), startDate, endDate);
+
+        int totalTrips = trips.size();
+        double totalDistKm = trips.stream()
+                .mapToDouble(t -> t.getDistanceKm() != null ? t.getDistanceKm().doubleValue() : 0.0)
+                .sum();
+        long totalDurationSec = trips.stream()
+                .mapToLong(this::calculateTripDurationSeconds)
+                .sum();
+        String totalDurationFormatted = formatDuration(totalDurationSec);
+
+        long vehiclesEntered = trips.stream()
+                .map(t -> t.getVehicle() != null ? t.getVehicle().getId() : null)
+                .filter(Objects::nonNull).distinct().count();
+        long vehiclesExited = trips.stream()
+                .filter(t -> t.getEndTime() != null)
+                .map(t -> t.getVehicle() != null ? t.getVehicle().getId() : null)
+                .filter(Objects::nonNull).distinct().count();
+
+        // Alert category breakdown
+        long overspeed = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("overspeed")).count();
+        long harshBraking = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("braking")).count();
+        long harshAccel = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("accel")).count();
+        long gpsDisc = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("gps")).count();
+        long nightDriving = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("night")).count();
+        long fatigue = alerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("fatigue")).count();
+
+        int nightSec = statsList.stream()
+                .mapToInt(s -> s.getNightDrivingSeconds() != null ? s.getNightDrivingSeconds() : 0)
+                .sum();
+        double nightHours = nightSec > 0 ? nightSec / 3600.0 : (nightDriving * 1.5);
+
+        // Standardized Safety Score calculation
+        SafetyScoreBreakdownDTO breakdown = safetyScoreService.calculateDriverScore(
+                driver, totalTrips, totalDistKm,
+                overspeed, harshBraking, harshAccel, gpsDisc, nightDriving, nightHours, fatigue,
+                from, to);
+
+        // SECTION B: Vehicles Operated by Driver in this period (Historical association)
+        Map<String, DriverVehicleSummaryDTO> vehicleSummaryMap = new LinkedHashMap<>();
+        for (Trip t : trips) {
+            String vNum = t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : "Unknown";
+            Long vId = t.getVehicle() != null ? t.getVehicle().getId() : null;
+            long durSec = calculateTripDurationSeconds(t);
+
+            DriverVehicleSummaryDTO summary = vehicleSummaryMap.computeIfAbsent(vNum, vn -> DriverVehicleSummaryDTO.builder()
+                    .driverId(driver.getId())
+                    .driverCode(driver.getCode())
+                    .driverName(driver.getName())
+                    .vehicleId(vId)
+                    .vehicleNumber(vn)
+                    .trips(0L)
+                    .distanceKm(BigDecimal.ZERO)
+                    .durationSeconds(0L)
+                    .formattedDuration("00h 00m 00s")
+                    .alerts(0L)
+                    .overspeedCount(0L)
+                    .harshBrakingCount(0L)
+                    .otherAlertCount(0L)
+                    .build());
+            summary.setTrips(summary.getTrips() + 1);
+            if (t.getDistanceKm() != null) {
+                summary.setDistanceKm(summary.getDistanceKm().add(t.getDistanceKm()).setScale(2, RoundingMode.HALF_UP));
+            }
+            summary.setDurationSeconds(summary.getDurationSeconds() + durSec);
+            summary.setFormattedDuration(formatDuration(summary.getDurationSeconds()));
+        }
+
+        for (Alert a : alerts) {
+            String vNum = a.getVehicle() != null ? a.getVehicle().getRegistrationNumber() : "Unknown";
+            DriverVehicleSummaryDTO summary = vehicleSummaryMap.get(vNum);
+            if (summary != null) {
+                summary.setAlerts(summary.getAlerts() + 1);
+                String at = a.getAlertType() != null ? a.getAlertType().toLowerCase() : "";
+                if (at.contains("overspeed")) {
+                    summary.setOverspeedCount(summary.getOverspeedCount() + 1);
+                } else if (at.contains("braking")) {
+                    summary.setHarshBrakingCount(summary.getHarshBrakingCount() + 1);
+                } else {
+                    summary.setOtherAlertCount(summary.getOtherAlertCount() + 1);
+                }
+            }
+        }
+        List<DriverVehicleSummaryDTO> vehiclesOperatedList = new ArrayList<>(vehicleSummaryMap.values());
+        vehiclesOperatedList.sort((a, b) -> Long.compare(b.getTrips(), a.getTrips()));
+
+        // SECTION C: Detailed Trip Tracking rows (16 columns)
+        List<TripTrackingDTO> tripTrackingList = new ArrayList<>();
+        for (Trip t : trips) {
+            long durSec = calculateTripDurationSeconds(t);
+            tripTrackingList.add(TripTrackingDTO.builder()
+                    .tripId(t.getId())
+                    .vehicleNumber(t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : "N/A")
+                    .driverName(driver.getName())
+                    .tripStartDate(t.getStartTime() != null ? t.getStartTime().format(DATE_FMT) : "N/A")
+                    .entryStartTime(t.getStartTime() != null ? t.getStartTime().format(TIME_FMT) : "N/A")
+                    .startLocation(formatLocation(t.getPrimaryRoad(), t.getStartLatitude(), t.getStartLongitude(), "GPS Start"))
+                    .tripEndDate(t.getEndTime() != null ? t.getEndTime().format(DATE_FMT) : "Active")
+                    .exitEndTime(t.getEndTime() != null ? t.getEndTime().format(TIME_FMT) : "Active")
+                    .endLocation(formatLocation(null, t.getEndLatitude(), t.getEndLongitude(), t.getEndTime() != null ? "GPS End" : "Active / In Transit"))
+                    .destination(t.getPrimaryRoad() != null && !t.getPrimaryRoad().isBlank() ? t.getPrimaryRoad() : "N/A")
+                    .totalDistanceKm(t.getDistanceKm() != null ? t.getDistanceKm().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .totalTripDurationFormatted(formatDuration(durSec))
+                    .durationSeconds(durSec)
+                    .averageSpeedKmph(t.getAverageSpeedKmph() != null ? t.getAverageSpeedKmph().setScale(1, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .maxSpeedKmph(t.getMaxSpeedKmph() != null ? t.getMaxSpeedKmph().setScale(1, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .alertsDuringTrip(t.getAlertCount() != null ? t.getAlertCount() : 0)
+                    .tripStatus(t.getStatus() != null ? t.getStatus() : "COMPLETED")
+                    .build());
+        }
+
+        // SECTION D: Alert Event Details and Grouped Summaries (8 columns)
+        List<AlertReportItemDTO> alertEvents = new ArrayList<>();
+        Map<String, AlertReportItemDTO> alertSummaryMap = new LinkedHashMap<>();
+
+        Map<String, Long> alertTypeCounts = new LinkedHashMap<>();
+        Map<String, Long> alertSeverityCounts = new LinkedHashMap<>();
+        Map<String, Long> alertStatusCounts = new LinkedHashMap<>();
+
+        for (Alert a : alerts) {
+            String vNum = a.getVehicle() != null ? a.getVehicle().getRegistrationNumber() : "N/A";
+            String aDate = a.getOccurredAt() != null ? a.getOccurredAt().format(DATE_FMT) : "N/A";
+            String aTime = a.getOccurredAt() != null ? a.getOccurredAt().format(TIME_FMT) : "N/A";
+            String aType = a.getAlertType() != null ? a.getAlertType() : "Unknown Alert";
+            String sev   = a.getSeverity() != null ? a.getSeverity() : "WARNING";
+            String stat  = a.getStatus() != null ? a.getStatus() : "OPEN";
+
+            alertTypeCounts.put(aType, alertTypeCounts.getOrDefault(aType, 0L) + 1);
+            alertSeverityCounts.put(sev, alertSeverityCounts.getOrDefault(sev, 0L) + 1);
+            alertStatusCounts.put(stat, alertStatusCounts.getOrDefault(stat, 0L) + 1);
+
+            alertEvents.add(AlertReportItemDTO.builder()
+                    .alertId(a.getId())
+                    .vehicleNumber(vNum)
+                    .date(aDate)
+                    .time(aTime)
+                    .alertType(aType)
+                    .severity(sev)
+                    .count(1L)
+                    .driverName(driver.getName())
+                    .status(stat)
+                    .build());
+
+            String groupKey = vNum + "|" + aDate + "|" + aType + "|" + sev + "|" + stat;
+            AlertReportItemDTO grouped = alertSummaryMap.computeIfAbsent(groupKey, k -> AlertReportItemDTO.builder()
+                    .vehicleNumber(vNum)
+                    .date(aDate)
+                    .time(aTime)
+                    .alertType(aType)
+                    .severity(sev)
+                    .count(0L)
+                    .driverName(driver.getName())
+                    .status(stat)
+                    .build());
+            grouped.setCount(grouped.getCount() + 1);
+        }
+        List<AlertReportItemDTO> alertSummaries = new ArrayList<>(alertSummaryMap.values());
+
+        String reportId = "DRVRPT_" + driver.getCode() + "_" + rType + "_" + startDate + "_" + UUID.randomUUID().toString().substring(0, 6);
         String fileName = reportId + ".pdf";
 
         try {
             Files.createDirectories(Paths.get(reportsOutputDir));
             String filePath = reportsOutputDir + File.separator + fileName;
 
-            generateDriverPdf(filePath, driver, startDate, endDate, req.getReportType());
+            generateDriverPdfV2(filePath, driver, startDate, endDate, rType,
+                    breakdown, vehiclesEntered, vehiclesExited, totalDurationFormatted,
+                    vehiclesOperatedList, tripTrackingList, alertSummaries,
+                    alertTypeCounts, alertSeverityCounts, alertStatusCounts);
+
+            Map<String, Object> reportDataMap = new LinkedHashMap<>();
+            reportDataMap.put("driverName", driver.getName());
+            reportDataMap.put("driverCode", driver.getCode());
+            reportDataMap.put("driverId", driver.getId());
+            reportDataMap.put("reportType", rType);
+            reportDataMap.put("startDate", startDate.toString());
+            reportDataMap.put("endDate", endDate.toString());
+            reportDataMap.put("safetyScore", breakdown.getFinalSafetyScore());
+            reportDataMap.put("performanceCategory", breakdown.getPerformanceCategory());
+            reportDataMap.put("safetyBreakdown", breakdown);
+            reportDataMap.put("totalVehiclesEntered", vehiclesEntered);
+            reportDataMap.put("totalVehiclesExited", vehiclesExited);
+            reportDataMap.put("totalTrips", totalTrips);
+            reportDataMap.put("totalDistanceKm", BigDecimal.valueOf(totalDistKm).setScale(2, RoundingMode.HALF_UP));
+            reportDataMap.put("totalDurationSeconds", totalDurationSec);
+            reportDataMap.put("totalDurationFormatted", totalDurationFormatted);
+            reportDataMap.put("totalAlerts", alerts.size());
+            reportDataMap.put("vehiclesOperated", vehiclesOperatedList);
+            reportDataMap.put("trips", tripTrackingList);
+            reportDataMap.put("alertSummaries", alertSummaries);
+            reportDataMap.put("alertEvents", alertEvents);
+            reportDataMap.put("alertTypeCounts", alertTypeCounts);
+            reportDataMap.put("alertSeverityCounts", alertSeverityCounts);
+            reportDataMap.put("alertStatusCounts", alertStatusCounts);
 
             ReportResponseDTO resp = new ReportResponseDTO();
             resp.setReportId(reportId);
-            resp.setReportType(req.getReportType() != null ? req.getReportType() : "MONTHLY");
+            resp.setReportType(rType);
             resp.setStatus("READY");
             resp.setPdfUrl("/api/reports/" + reportId + "/pdf");
             resp.setDownloadUrl("/api/reports/" + reportId + "/download");
             resp.setGeneratedAt(LocalDateTime.now());
-            resp.setMessage("Report generated successfully");
-            resp.setReportData(Map.of("driverName", driver.getName(), "driverCode", driver.getCode(),
-                "startDate", startDate.toString(), "endDate", endDate.toString()));
+            resp.setMessage("Driver " + rType.toLowerCase() + " report generated successfully with all 4 sections");
+            resp.setReportData(reportDataMap);
             return resp;
 
         } catch (Exception e) {
             log.error("Error generating driver report for {}", driver.getCode(), e);
             ReportResponseDTO resp = new ReportResponseDTO();
             resp.setStatus("FAILED");
-            resp.setMessage("Error: " + e.getMessage());
+            resp.setMessage("Error generating report: " + e.getMessage());
             return resp;
         }
     }
 
+    // ==================================================================
+    // 2. FLEET REPORT GENERATION (All 4 Combinations)
+    // ==================================================================
     public ReportResponseDTO generateFleetReport(ReportRequestDTO req) {
-        List<Driver> drivers = driverRepository.findByActiveTrue();
-        LocalDate startDate = resolveStartDate(req);
-        LocalDate endDate   = resolveEndDate(req, startDate);
-
-        String reportId = "FLTRPT_" + startDate + "_" + endDate + "_" + UUID.randomUUID().toString().substring(0, 6);
-        String fileName = reportId + ".pdf";
-
-        try {
-            Files.createDirectories(Paths.get(reportsOutputDir));
-            String filePath = reportsOutputDir + File.separator + fileName;
-
-            generateFleetPdf(filePath, drivers, startDate, endDate);
-
-            ReportResponseDTO resp = new ReportResponseDTO();
-            resp.setReportId(reportId);
-            resp.setReportType("FLEET_MONTHLY");
-            resp.setStatus("READY");
-            resp.setPdfUrl("/api/reports/" + reportId + "/pdf");
-            resp.setDownloadUrl("/api/reports/" + reportId + "/download");
-            resp.setGeneratedAt(LocalDateTime.now());
-            resp.setMessage("Fleet report generated successfully");
-            return resp;
-
-        } catch (Exception e) {
-            log.error("Error generating fleet report", e);
-            ReportResponseDTO resp = new ReportResponseDTO();
-            resp.setStatus("FAILED");
-            resp.setMessage("Error: " + e.getMessage());
-            return resp;
-        }
+        OverallReportDTO overall = generateOverallReport(req);
+        ReportResponseDTO resp = new ReportResponseDTO();
+        resp.setReportId(overall.getReportId());
+        resp.setReportType(overall.getReportType());
+        resp.setStatus("READY");
+        resp.setPdfUrl(overall.getPdfUrl());
+        resp.setDownloadUrl(overall.getDownloadUrl());
+        resp.setGeneratedAt(overall.getGeneratedAt());
+        resp.setMessage("Fleet " + overall.getReportType().toLowerCase() + " report generated successfully with all 4 sections");
+        resp.setReportData(overall);
+        return resp;
     }
 
-    // ----------------------------------------------------------------
-    // OVERALL FLEET REPORT  (daily / weekly / monthly / custom)
-    // ----------------------------------------------------------------
-    public com.gps.tracking.dto.OverallReportDTO generateOverallReport(ReportRequestDTO req) {
+    // ==================================================================
+    // 3. OVERALL FLEET REPORT DATA & PDF (Daily / Weekly / Monthly / Custom)
+    // ==================================================================
+    public OverallReportDTO generateOverallReport(ReportRequestDTO req) {
         LocalDate startDate = resolveStartDate(req);
         LocalDate endDate   = resolveEndDate(req, startDate);
         LocalDateTime from  = startDate.atStartOfDay();
         LocalDateTime to    = endDate.plusDays(1).atStartOfDay();
 
+        String rType = req.getReportType() != null ? req.getReportType().toUpperCase() : "MONTHLY";
+        if ("FLEET".equalsIgnoreCase(rType)) {
+            rType = "MONTHLY";
+        }
+
         // 1. Vehicle entry / exit counts
-        long vehiclesEntered  = tripRepository.countDistinctVehiclesWithTripStarted(from, to);
-        long vehiclesExited   = tripRepository.countDistinctVehiclesWithTripCompleted(from, to);
+        long vehiclesEntered = tripRepository.countDistinctVehiclesWithTripStarted(from, to);
+        long vehiclesExited  = tripRepository.countDistinctVehiclesWithTripCompleted(from, to);
 
-        // 2. Total alerts
-        long totalAlerts = alertRepository.countInDateRange(from, to);
+        // 2. All Trips and Alerts for the fleet in this half-open date range
+        List<Trip> allTrips = tripRepository.findByStartTimeBetween(from, to);
+        List<Alert> allAlerts = alertRepository.findAlertsInDateRange(from, to);
 
-        // 3. Alert type summary
-        List<Object[]> typeRows = alertRepository.countByTypeInDateRange(from, to);
+        long totalTrips = allTrips.size();
+        double totalDistKm = allTrips.stream()
+                .mapToDouble(t -> t.getDistanceKm() != null ? t.getDistanceKm().doubleValue() : 0.0)
+                .sum();
+        long totalDurationSec = allTrips.stream()
+                .mapToLong(this::calculateTripDurationSeconds)
+                .sum();
+        String totalDurationFormatted = formatDuration(totalDurationSec);
+        long totalAlerts = allAlerts.size();
+
+        // 3. Aggregate Summaries: Alert Types, Severities, Statuses, Vehicles
         Map<String, Long> alertTypeSummary = new LinkedHashMap<>();
-        for (Object[] row : typeRows) {
-            alertTypeSummary.put(String.valueOf(row[0]), ((Number) row[1]).longValue());
+        Map<String, Long> alertSeveritySummary = new LinkedHashMap<>();
+        Map<String, Long> alertStatusSummary = new LinkedHashMap<>();
+        Map<String, Long> vehicleAlertSummary = new LinkedHashMap<>();
+
+        for (Alert a : allAlerts) {
+            String at = a.getAlertType() != null ? a.getAlertType() : "Unknown";
+            String sev = a.getSeverity() != null ? a.getSeverity() : "WARNING";
+            String stat = a.getStatus() != null ? a.getStatus() : "OPEN";
+            String vReg = a.getVehicle() != null ? a.getVehicle().getRegistrationNumber() : "Unknown Vehicle";
+
+            alertTypeSummary.put(at, alertTypeSummary.getOrDefault(at, 0L) + 1);
+            alertSeveritySummary.put(sev, alertSeveritySummary.getOrDefault(sev, 0L) + 1);
+            alertStatusSummary.put(stat, alertStatusSummary.getOrDefault(stat, 0L) + 1);
+            vehicleAlertSummary.put(vReg, vehicleAlertSummary.getOrDefault(vReg, 0L) + 1);
         }
 
-        // 4. Per-driver alert breakdown
-        List<Object[]> driverRows = alertRepository.driverAlertBreakdownInDateRange(from, to);
-        // Group by driverId: key = driverId, value = DriverAlertRow builder
-        Map<Long, com.gps.tracking.dto.OverallReportDTO.DriverAlertRow.DriverAlertRowBuilder> builderMap = new LinkedHashMap<>();
-        for (Object[] row : driverRows) {
-            Long   driverId   = ((Number) row[0]).longValue();
-            String driverCode = String.valueOf(row[1]);
-            String driverName = String.valueOf(row[2]);
-            String alertType  = String.valueOf(row[3]).toLowerCase();
-            long   count      = ((Number) row[4]).longValue();
+        // 4. Per-Driver Summary & Ranking (Section A)
+        List<Driver> allDrivers = driverRepository.findAll();
+        List<OverallReportDTO.DriverAlertRow> driverRows = new ArrayList<>();
+        double scoreSum = 0.0;
+        int activeDriverCount = 0;
 
-            var b = builderMap.computeIfAbsent(driverId, id ->
-                com.gps.tracking.dto.OverallReportDTO.DriverAlertRow.builder()
-                    .driverId(id).driverCode(driverCode).driverName(driverName)
-                    .vehicles("—")
-            );
-            if (alertType.contains("overspeed"))             b.overspeed(count);
-            else if (alertType.contains("harsh braking") || alertType.contains("harsh_braking")) b.harshBraking(count);
-            else if (alertType.contains("harsh acc") || alertType.contains("harsh_acc"))         b.harshAcceleration(count);
-            else if (alertType.contains("gps"))              b.gpsDisconnect(count);
-            else if (alertType.contains("night"))            b.nightDriving(count);
-            else if (alertType.contains("ignition"))         b.ignition(count);
-            else if (alertType.contains("fatigue"))          b.fatigue(count);
-            else {
-                // accumulate in 'other'
-                var existing = builderMap.get(driverId);
-                // We can't easily mutate 'other' without building — track via totalAlerts for now
+        for (Driver d : allDrivers) {
+            List<Trip> dTrips = allTrips.stream()
+                    .filter(t -> t.getDriver() != null && t.getDriver().getId().equals(d.getId()))
+                    .collect(Collectors.toList());
+
+            List<Alert> dAlerts = allAlerts.stream()
+                    .filter(a -> (a.getDriver() != null && a.getDriver().getId().equals(d.getId()))
+                            || (a.getDriver() == null && a.getTrip() != null && a.getTrip().getDriver() != null && a.getTrip().getDriver().getId().equals(d.getId())))
+                    .collect(Collectors.toList());
+
+            if (dTrips.isEmpty() && dAlerts.isEmpty()) {
+                continue; // Only drivers with activity in this reporting period
+            }
+
+            activeDriverCount++;
+
+            String vehiclesOperated = dTrips.stream()
+                    .map(t -> t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : null)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.joining(", "));
+            if (vehiclesOperated.isEmpty()) vehiclesOperated = "—";
+
+            long tripsCount = dTrips.size();
+            double distKm = dTrips.stream().mapToDouble(t -> t.getDistanceKm() != null ? t.getDistanceKm().doubleValue() : 0.0).sum();
+            long dDurationSec = dTrips.stream().mapToLong(this::calculateTripDurationSeconds).sum();
+
+            long ov = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("overspeed")).count();
+            long hb = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("braking")).count();
+            long ha = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("accel")).count();
+            long gps = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("gps")).count();
+            long night = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("night")).count();
+            long ign = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("ignition")).count();
+            long fat = dAlerts.stream().filter(a -> a.getAlertType().toLowerCase().contains("fatigue")).count();
+            long other = dAlerts.size() - (ov + hb + ha + gps + night + ign + fat);
+
+            SafetyScoreBreakdownDTO sc = safetyScoreService.calculateDriverScore(
+                    d, (int) tripsCount, distKm, ov, hb, ha, gps, night, night * 1.5, fat, from, to);
+
+            scoreSum += sc.getFinalSafetyScore().doubleValue();
+
+            driverRows.add(OverallReportDTO.DriverAlertRow.builder()
+                    .driverId(d.getId())
+                    .driverCode(d.getCode())
+                    .driverName(d.getName())
+                    .vehicles(vehiclesOperated)
+                    .tripCount(tripsCount)
+                    .totalDistanceKm(BigDecimal.valueOf(distKm).setScale(2, RoundingMode.HALF_UP))
+                    .formattedDuration(formatDuration(dDurationSec))
+                    .safetyScore(sc.getFinalSafetyScore())
+                    .performanceCategory(sc.getPerformanceCategory())
+                    .totalAlerts(dAlerts.size())
+                    .overspeed(ov)
+                    .harshBraking(hb)
+                    .harshAcceleration(ha)
+                    .gpsDisconnect(gps)
+                    .nightDriving(night)
+                    .ignition(ign)
+                    .fatigue(fat)
+                    .other(Math.max(0, other))
+                    .build());
+        }
+
+        // Sort ranking descending by safety score
+        driverRows.sort((a, b) -> b.getSafetyScore().compareTo(a.getSafetyScore()));
+
+        BigDecimal avgFleetScore = activeDriverCount > 0
+                ? BigDecimal.valueOf(scoreSum / activeDriverCount).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.valueOf(100.00).setScale(2, RoundingMode.HALF_UP);
+
+        String fleetCategory = avgFleetScore.compareTo(BigDecimal.valueOf(80.00)) >= 0 ? "Excellent"
+                : avgFleetScore.compareTo(BigDecimal.valueOf(60.00)) >= 0 ? "Average" : "Needs Improvement";
+
+        // 5. SECTION B: Complete Vehicles Operated (Driver-Vehicle Historical Combination Matrix)
+        Map<String, DriverVehicleSummaryDTO> dvMap = new LinkedHashMap<>();
+        for (Trip t : allTrips) {
+            Long drvId = t.getDriver() != null ? t.getDriver().getId() : 0L;
+            String drvCode = t.getDriver() != null ? t.getDriver().getCode() : "—";
+            String drvName = t.getDriver() != null ? t.getDriver().getName() : "Unassigned";
+            Long vId = t.getVehicle() != null ? t.getVehicle().getId() : 0L;
+            String vReg = t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : "Unknown";
+            long durSec = calculateTripDurationSeconds(t);
+
+            String key = drvId + "_" + vId;
+            DriverVehicleSummaryDTO dto = dvMap.computeIfAbsent(key, k -> DriverVehicleSummaryDTO.builder()
+                    .driverId(drvId)
+                    .driverCode(drvCode)
+                    .driverName(drvName)
+                    .vehicleId(vId)
+                    .vehicleNumber(vReg)
+                    .trips(0L)
+                    .distanceKm(BigDecimal.ZERO)
+                    .durationSeconds(0L)
+                    .formattedDuration("00h 00m 00s")
+                    .alerts(0L)
+                    .overspeedCount(0L)
+                    .harshBrakingCount(0L)
+                    .otherAlertCount(0L)
+                    .build());
+
+            dto.setTrips(dto.getTrips() + 1);
+            if (t.getDistanceKm() != null) {
+                dto.setDistanceKm(dto.getDistanceKm().add(t.getDistanceKm()).setScale(2, RoundingMode.HALF_UP));
+            }
+            dto.setDurationSeconds(dto.getDurationSeconds() + durSec);
+            dto.setFormattedDuration(formatDuration(dto.getDurationSeconds()));
+        }
+
+        // Link alerts to the corresponding driver-vehicle pairing
+        for (Alert a : allAlerts) {
+            Long drvId = a.getDriver() != null ? a.getDriver().getId()
+                    : (a.getTrip() != null && a.getTrip().getDriver() != null ? a.getTrip().getDriver().getId() : 0L);
+            Long vId = a.getVehicle() != null ? a.getVehicle().getId() : 0L;
+            String key = drvId + "_" + vId;
+            DriverVehicleSummaryDTO dto = dvMap.get(key);
+            if (dto != null) {
+                dto.setAlerts(dto.getAlerts() + 1);
+                String at = a.getAlertType() != null ? a.getAlertType().toLowerCase() : "";
+                if (at.contains("overspeed")) {
+                    dto.setOverspeedCount(dto.getOverspeedCount() + 1);
+                } else if (at.contains("braking")) {
+                    dto.setHarshBrakingCount(dto.getHarshBrakingCount() + 1);
+                } else {
+                    dto.setOtherAlertCount(dto.getOtherAlertCount() + 1);
+                }
             }
         }
+        List<DriverVehicleSummaryDTO> driverVehicleDetails = new ArrayList<>(dvMap.values());
+        driverVehicleDetails.sort((a, b) -> a.getDriverName().compareToIgnoreCase(b.getDriverName()));
 
-        // Populate vehicle registrations per driver from DB
-        Map<Long, String> driverVehicles = new HashMap<>();
-        vehicleRepository.findAll().forEach(v -> {
-            if (v.getDriver() != null) {
-                driverVehicles.merge(v.getDriver().getId(),
-                    v.getRegistrationNumber(), (a, b) -> a + ", " + b);
-            }
-        });
-
-        // Build row list with totalAlerts sum
-        List<com.gps.tracking.dto.OverallReportDTO.DriverAlertRow> driverDetails = new ArrayList<>();
-        for (var entry : builderMap.entrySet()) {
-            Long driverId = entry.getKey();
-            var b = entry.getValue();
-            b.vehicles(driverVehicles.getOrDefault(driverId, "—"));
-            var built = b.build();
-            long rowTotal = built.getOverspeed() + built.getHarshBraking() + built.getHarshAcceleration()
-                + built.getGpsDisconnect() + built.getNightDriving() + built.getIgnition()
-                + built.getFatigue() + built.getOther();
-            // Also sum 'other' from raw rows
-            long otherSum = driverRows.stream()
-                .filter(r -> ((Number) r[0]).longValue() == driverId)
-                .mapToLong(r -> {
-                    String t = String.valueOf(r[3]).toLowerCase();
-                    if (t.contains("overspeed") || t.contains("harsh") || t.contains("gps")
-                        || t.contains("night") || t.contains("ignition") || t.contains("fatigue")) return 0;
-                    return ((Number) r[4]).longValue();
-                }).sum();
-            driverDetails.add(b.other(otherSum).totalAlerts(rowTotal + otherSum).build());
+        // 6. SECTION C: Trip Tracking records (All 16 columns)
+        List<TripTrackingDTO> fleetTripDetails = new ArrayList<>();
+        for (Trip t : allTrips) {
+            long durSec = calculateTripDurationSeconds(t);
+            fleetTripDetails.add(TripTrackingDTO.builder()
+                    .tripId(t.getId())
+                    .vehicleNumber(t.getVehicle() != null ? t.getVehicle().getRegistrationNumber() : "N/A")
+                    .driverName(t.getDriver() != null ? t.getDriver().getName() : "—")
+                    .tripStartDate(t.getStartTime() != null ? t.getStartTime().format(DATE_FMT) : "N/A")
+                    .entryStartTime(t.getStartTime() != null ? t.getStartTime().format(TIME_FMT) : "N/A")
+                    .startLocation(formatLocation(t.getPrimaryRoad(), t.getStartLatitude(), t.getStartLongitude(), "GPS Start"))
+                    .tripEndDate(t.getEndTime() != null ? t.getEndTime().format(DATE_FMT) : "Active")
+                    .exitEndTime(t.getEndTime() != null ? t.getEndTime().format(TIME_FMT) : "Active")
+                    .endLocation(formatLocation(null, t.getEndLatitude(), t.getEndLongitude(), t.getEndTime() != null ? "GPS End" : "Active / In Transit"))
+                    .destination(t.getPrimaryRoad() != null && !t.getPrimaryRoad().isBlank() ? t.getPrimaryRoad() : "N/A")
+                    .totalDistanceKm(t.getDistanceKm() != null ? t.getDistanceKm().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .totalTripDurationFormatted(formatDuration(durSec))
+                    .durationSeconds(durSec)
+                    .averageSpeedKmph(t.getAverageSpeedKmph() != null ? t.getAverageSpeedKmph().setScale(1, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .maxSpeedKmph(t.getMaxSpeedKmph() != null ? t.getMaxSpeedKmph().setScale(1, RoundingMode.HALF_UP) : BigDecimal.ZERO)
+                    .alertsDuringTrip(t.getAlertCount() != null ? t.getAlertCount() : 0)
+                    .tripStatus(t.getStatus() != null ? t.getStatus() : "COMPLETED")
+                    .build());
         }
 
-        // 5. Generate PDF
-        String rtype = req.getReportType() != null ? req.getReportType().toUpperCase() : "OVERALL";
-        String reportId = "OVRRPT_" + rtype + "_" + startDate + "_" + UUID.randomUUID().toString().substring(0, 6);
+        // 7. SECTION D: Alert Event Details and Grouped Summaries (All 8 columns)
+        List<AlertReportItemDTO> fleetAlertEvents = new ArrayList<>();
+        Map<String, AlertReportItemDTO> fleetAlertSummaryMap = new LinkedHashMap<>();
+
+        for (Alert a : allAlerts) {
+            String vNum = a.getVehicle() != null ? a.getVehicle().getRegistrationNumber() : "N/A";
+            String aDate = a.getOccurredAt() != null ? a.getOccurredAt().format(DATE_FMT) : "N/A";
+            String aTime = a.getOccurredAt() != null ? a.getOccurredAt().format(TIME_FMT) : "N/A";
+            String aType = a.getAlertType() != null ? a.getAlertType() : "Unknown Alert";
+            String sev   = a.getSeverity() != null ? a.getSeverity() : "WARNING";
+            String dName = a.getDriver() != null ? a.getDriver().getName()
+                    : (a.getTrip() != null && a.getTrip().getDriver() != null ? a.getTrip().getDriver().getName() : "—");
+            String stat  = a.getStatus() != null ? a.getStatus() : "OPEN";
+
+            fleetAlertEvents.add(AlertReportItemDTO.builder()
+                    .alertId(a.getId())
+                    .vehicleNumber(vNum)
+                    .date(aDate)
+                    .time(aTime)
+                    .alertType(aType)
+                    .severity(sev)
+                    .count(1L)
+                    .driverName(dName)
+                    .status(stat)
+                    .build());
+
+            String groupKey = vNum + "|" + aDate + "|" + aType + "|" + sev + "|" + stat + "|" + dName;
+            AlertReportItemDTO grouped = fleetAlertSummaryMap.computeIfAbsent(groupKey, k -> AlertReportItemDTO.builder()
+                    .vehicleNumber(vNum)
+                    .date(aDate)
+                    .time(aTime)
+                    .alertType(aType)
+                    .severity(sev)
+                    .count(0L)
+                    .driverName(dName)
+                    .status(stat)
+                    .build());
+            grouped.setCount(grouped.getCount() + 1);
+        }
+        List<AlertReportItemDTO> fleetAlertSummaries = new ArrayList<>(fleetAlertSummaryMap.values());
+
+        // 8. Generate Complete Fleet PDF containing ALL FOUR SECTIONS
+        String reportId = "FLTRPT_" + rType + "_" + startDate + "_" + UUID.randomUUID().toString().substring(0, 6);
         String fileName = reportId + ".pdf";
         String pdfUrl = null, downloadUrl = null;
 
         try {
             Files.createDirectories(Paths.get(reportsOutputDir));
             String filePath = reportsOutputDir + File.separator + fileName;
-            generateOverallPdf(filePath, rtype, startDate, endDate,
-                vehiclesEntered, vehiclesExited, totalAlerts, alertTypeSummary, driverDetails);
+
+            generateFleetPdfV2(filePath, rType, startDate, endDate,
+                    vehiclesEntered, vehiclesExited, totalTrips, totalDistKm, totalDurationFormatted,
+                    totalAlerts, avgFleetScore, fleetCategory,
+                    driverRows, driverVehicleDetails, fleetTripDetails,
+                    fleetAlertSummaries, alertTypeSummary, alertSeveritySummary, alertStatusSummary);
+
             pdfUrl = "/api/reports/" + reportId + "/pdf";
             downloadUrl = "/api/reports/" + reportId + "/download";
         } catch (Exception e) {
-            log.error("Error generating overall PDF", e);
+            log.error("Error generating overall Fleet PDF", e);
         }
 
-        return com.gps.tracking.dto.OverallReportDTO.builder()
-            .reportType(rtype)
-            .startDate(startDate)
-            .endDate(endDate)
-            .generatedAt(LocalDateTime.now())
-            .totalVehiclesEntered(vehiclesEntered)
-            .totalVehiclesExited(vehiclesExited)
-            .totalAlerts(totalAlerts)
-            .alertTypeSummary(alertTypeSummary)
-            .driverAlertDetails(driverDetails)
-            .reportId(reportId)
-            .pdfUrl(pdfUrl)
-            .downloadUrl(downloadUrl)
-            .message("Overall " + rtype.toLowerCase() + " report generated successfully")
-            .build();
+        return OverallReportDTO.builder()
+                .reportType(rType)
+                .startDate(startDate)
+                .endDate(endDate)
+                .generatedAt(LocalDateTime.now())
+                .totalVehiclesEntered(vehiclesEntered)
+                .totalVehiclesExited(vehiclesExited)
+                .totalTrips(totalTrips)
+                .totalDistanceKm(BigDecimal.valueOf(totalDistKm).setScale(2, RoundingMode.HALF_UP))
+                .totalDurationSeconds(totalDurationSec)
+                .totalDurationFormatted(totalDurationFormatted)
+                .totalAlerts(totalAlerts)
+                .averageSafetyScore(avgFleetScore)
+                .performanceCategory(fleetCategory)
+                .alertTypeSummary(alertTypeSummary)
+                .alertSeveritySummary(alertSeveritySummary)
+                .alertStatusSummary(alertStatusSummary)
+                .vehicleAlertSummary(vehicleAlertSummary)
+                .driverAlertDetails(driverRows)
+                .driverVehicleDetails(driverVehicleDetails)
+                .tripDetails(fleetTripDetails)
+                .alertEvents(fleetAlertEvents)
+                .alertSummaries(fleetAlertSummaries)
+                .reportId(reportId)
+                .pdfUrl(pdfUrl)
+                .downloadUrl(downloadUrl)
+                .message("Fleet " + rType.toLowerCase() + " report generated successfully with all 4 sections")
+                .build();
     }
 
-    private void generateOverallPdf(String filePath, String rtype,
-            LocalDate startDate, LocalDate endDate,
-            long vehiclesEntered, long vehiclesExited, long totalAlerts,
-            Map<String, Long> alertTypeSummary,
-            List<com.gps.tracking.dto.OverallReportDTO.DriverAlertRow> driverDetails) throws Exception {
+    // ==================================================================
+    // 4. PDF GENERATION: DRIVER REPORT (A4 Landscape, All 4 Sections)
+    // ==================================================================
+    private void generateDriverPdfV2(String filePath, Driver driver, LocalDate startDate, LocalDate endDate,
+                                     String rType, SafetyScoreBreakdownDTO breakdown,
+                                     long vehiclesEntered, long vehiclesExited, String totalDurationFormatted,
+                                     List<DriverVehicleSummaryDTO> vehiclesOperated,
+                                     List<TripTrackingDTO> trips,
+                                     List<AlertReportItemDTO> alertSummaries,
+                                     Map<String, Long> alertTypeCounts,
+                                     Map<String, Long> alertSeverityCounts,
+                                     Map<String, Long> alertStatusCounts) throws Exception {
 
-        DateTimeFormatter dFmt = DateTimeFormatter.ofPattern("dd MMM yyyy");
-        DateTimeFormatter tsFmt = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
+        String timestampStr = LocalDateTime.now().format(GEN_FMT);
 
         try (PdfDocument pdfDoc = new PdfDocument(new PdfWriter(filePath));
-             Document document = new Document(pdfDoc, PageSize.A4.rotate())) {
+             Document doc = new Document(pdfDoc, PageSize.A4.rotate())) {
 
-            document.setMargins(30, 30, 30, 30);
+            // Register automatic running page footer with page number
+            pdfDoc.addEventHandler(PdfDocumentEvent.END_PAGE, new PageFooterHandler(timestampStr));
+            doc.setMargins(20, 24, 26, 24);
 
-            // Header
-            Paragraph title = new Paragraph("Overall Fleet Report — " + rtype)
-                .setFontSize(22).setBold().setFontColor(PRIMARY_BLUE);
-            Paragraph sub = new Paragraph(
-                startDate.format(dFmt) + " to " + endDate.format(dFmt) +
-                "   ·   Generated: " + LocalDateTime.now().format(tsFmt))
-                .setFontSize(10).setFontColor(TEXT_MUTED);
-            document.add(title);
-            document.add(sub);
-            document.add(new Paragraph("\n").setFontSize(4));
+            // Report Header Banner
+            Table header = new Table(UnitValue.createPercentArray(new float[]{65, 35})).useAllAvailableWidth();
+            Cell titleCell = new Cell().add(new Paragraph("TRACKFLEET GPS FLEET TRACKING SYSTEM")
+                    .setFontSize(8).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .add(new Paragraph("Driver Performance & Safety Report")
+                    .setFontSize(17).setBold().setFontColor(ColorConstants.WHITE))
+                    .add(new Paragraph("Driver: " + driver.getName() + " (" + driver.getCode() + ")  ·  " + rType + " Report")
+                    .setFontSize(10).setFontColor(new DeviceRgb(191, 219, 254)))
+                    .setBackgroundColor(HEADER_DARK).setPadding(10).setBorder(null);
+            header.addCell(titleCell);
 
-            // Summary metrics table
-            Table metrics = new Table(new float[]{1, 1, 1}).setWidth(UnitValue.createPercentValue(60));
-            for (String[] cell : new String[][]{
-                    {"Vehicles Entered", String.valueOf(vehiclesEntered), "blue"},
-                    {"Vehicles Exited",  String.valueOf(vehiclesExited), "green"},
-                    {"Total Alerts",     String.valueOf(totalAlerts),    "red"}
-            }) {
-                DeviceRgb colour = cell[2].equals("blue") ? PRIMARY_BLUE
-                    : cell[2].equals("green") ? SUCCESS_GREEN : DANGER_RED;
-                metrics.addCell(new Cell().add(new Paragraph(cell[0]).setFontSize(9).setFontColor(TEXT_MUTED))
-                    .add(new Paragraph(cell[1]).setFontSize(20).setBold().setFontColor(colour))
-                    .setBorder(null).setBackgroundColor(LIGHT_GRAY).setPadding(10));
-            }
-            document.add(metrics);
-            document.add(new Paragraph("\n").setFontSize(6));
+            Cell dateCell = new Cell()
+                    .add(new Paragraph("REPORTING PERIOD").setFontSize(7).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .add(new Paragraph(startDate.format(DATE_FMT) + " to " + endDate.format(DATE_FMT))
+                    .setFontSize(10).setBold().setFontColor(ColorConstants.WHITE))
+                    .add(new Paragraph("Generated: " + timestampStr + " IST")
+                    .setFontSize(7).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .setBackgroundColor(HEADER_DARK).setPadding(10).setTextAlignment(TextAlignment.RIGHT).setBorder(null);
+            header.addCell(dateCell);
+            doc.add(header);
 
-            // Alert type summary
-            document.add(new Paragraph("Alert Type Summary").setFontSize(13).setBold().setFontColor(HEADER_DARK));
-            Table atTable = new Table(new float[]{3, 1}).setWidth(UnitValue.createPercentValue(50));
-            atTable.addHeaderCell(headerCell("Alert Type"));
-            atTable.addHeaderCell(headerCell("Count"));
-            for (var entry : alertTypeSummary.entrySet()) {
-                atTable.addCell(dataCell(entry.getKey()));
-                atTable.addCell(dataCell(String.valueOf(entry.getValue())));
-            }
-            if (alertTypeSummary.isEmpty()) {
-                atTable.addCell(new Cell(1, 2).add(new Paragraph("No alerts in this period").setFontSize(9).setFontColor(TEXT_MUTED)).setBorder(null));
-            }
-            document.add(atTable);
-            document.add(new Paragraph("\n").setFontSize(6));
+            // ==============================================================
+            // SECTION 1: OVERVIEW & SCORING
+            // ==============================================================
+            addSectionHeading(doc, "1. Overview & Scoring", "Executive performance indicators and standardized driver safety scoring");
 
-            // Driver alert details
-            document.add(new Paragraph("Driver Alert Details").setFontSize(13).setBold().setFontColor(HEADER_DARK));
-            Table dTable = new Table(new float[]{2, 1.2f, 2, 1, 1, 1, 1, 1, 1, 1})
-                .setWidth(UnitValue.createPercentValue(100));
-            for (String h : new String[]{"Driver", "ID", "Vehicle(s)", "Total", "Overspeed",
-                    "Harsh Braking", "GPS Disc.", "Night", "Ignition", "Other"}) {
-                dTable.addHeaderCell(headerCell(h));
+            // KPI Metric Cards (8 cards in 2 rows of 4)
+            Table kpiTable = new Table(UnitValue.createPercentArray(new float[]{25, 25, 25, 25})).useAllAvailableWidth();
+            DeviceRgb scoreCol = breakdown.getFinalSafetyScore().compareTo(BigDecimal.valueOf(80)) >= 0 ? SUCCESS_GREEN
+                    : breakdown.getFinalSafetyScore().compareTo(BigDecimal.valueOf(60)) >= 0 ? WARNING_AMBER : DANGER_RED;
+
+            addMetricCard(kpiTable, "Safety Score", breakdown.getFinalSafetyScore() + " / 100", scoreCol);
+            addMetricCard(kpiTable, "Performance Category", breakdown.getPerformanceCategory(), scoreCol);
+            addMetricCard(kpiTable, "Total Trips Completed", String.valueOf(breakdown.getTotalTrips()), PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Total Distance Driven", breakdown.getTotalDistanceKm() + " km", PRIMARY_BLUE);
+
+            addMetricCard(kpiTable, "Total Driving Duration", totalDurationFormatted, PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Vehicles Operated (Entered)", String.valueOf(vehiclesEntered), PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Vehicles Completed (Exited)", String.valueOf(vehiclesExited), SUCCESS_GREEN);
+            long totalAlertCount = alertTypeCounts.values().stream().mapToLong(Long::longValue).sum();
+            addMetricCard(kpiTable, "Total Safety Alerts", String.valueOf(totalAlertCount), totalAlertCount == 0 ? SUCCESS_GREEN : DANGER_RED);
+            doc.add(kpiTable);
+
+            // Safety Score Breakdown Table
+            Paragraph formulaExpl = new Paragraph("Safety Score Formula: 100 - Σ(Normalized Event Rate_i × Weight_i) - Manager Penalty Deductions. Clamped between 0.00 and 100.00.")
+                    .setFontSize(7).setFontColor(TEXT_MUTED).setMarginTop(6).setMarginBottom(3);
+            doc.add(formulaExpl);
+
+            Table scoreTable = new Table(UnitValue.createPercentArray(new float[]{22, 12, 28, 16, 22})).useAllAvailableWidth();
+            addTableHeader(scoreTable, "Metric", "Event Count", "Normalized Event Rate", "Weight", "Weighted Penalty Contribution");
+            if (breakdown.getMetrics() != null && !breakdown.getMetrics().isEmpty()) {
+                int rIdx = 0;
+                for (var m : breakdown.getMetrics()) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    scoreTable.addCell(dataCell(m.getMetricName(), bg, false));
+                    scoreTable.addCell(dataCell(m.getCount() != null ? String.valueOf(m.getCount()) : "0", bg, true));
+                    scoreTable.addCell(dataCell(m.getNormalizedRate() != null ? m.getNormalizedRate() + " " + m.getRateUnit() : "0.00", bg, false));
+                    scoreTable.addCell(dataCell("× " + m.getWeight(), bg, true));
+                    scoreTable.addCell(dataCell("-" + m.getPenalty() + " pts", bg, true));
+                }
             }
-            for (var row : driverDetails) {
-                dTable.addCell(dataCell(row.getDriverName()));
-                dTable.addCell(dataCell(row.getDriverCode()));
-                dTable.addCell(dataCell(row.getVehicles()));
-                dTable.addCell(dataCell(String.valueOf(row.getTotalAlerts())));
-                dTable.addCell(dataCell(String.valueOf(row.getOverspeed())));
-                dTable.addCell(dataCell(String.valueOf(row.getHarshBraking())));
-                dTable.addCell(dataCell(String.valueOf(row.getGpsDisconnect())));
-                dTable.addCell(dataCell(String.valueOf(row.getNightDriving())));
-                dTable.addCell(dataCell(String.valueOf(row.getIgnition())));
-                dTable.addCell(dataCell(String.valueOf(row.getOther())));
+            if (breakdown.getManualPenaltyDeductions() != null && breakdown.getManualPenaltyDeductions().compareTo(BigDecimal.ZERO) > 0) {
+                scoreTable.addCell(dataCell("Manager Manual Deductions", ROW_EVEN, false));
+                scoreTable.addCell(dataCell("—", ROW_EVEN, true));
+                scoreTable.addCell(dataCell("Administrative Disciplinary Deductions", ROW_EVEN, false));
+                scoreTable.addCell(dataCell("—", ROW_EVEN, true));
+                scoreTable.addCell(dataCell("-" + breakdown.getManualPenaltyDeductions() + " pts", ROW_EVEN, true));
             }
-            if (driverDetails.isEmpty()) {
-                dTable.addCell(new Cell(1, 10).add(new Paragraph("No driver alert data for this period").setFontSize(9)).setBorder(null));
+            // Summary reconciliation row
+            Cell reconCell = new Cell(1, 5)
+                    .add(new Paragraph(String.format("Base Score: 100.00  |  Formula Deductions: -%.2f pts  |  Manual Deductions: -%.2f pts  |  Total Weighted Penalty: -%.2f pts  |  Final Safety Score: %.2f / 100 (%s)",
+                            breakdown.getFormulaDeductions() != null ? breakdown.getFormulaDeductions().doubleValue() : 0.0,
+                            breakdown.getManualPenaltyDeductions() != null ? breakdown.getManualPenaltyDeductions().doubleValue() : 0.0,
+                            breakdown.getTotalWeightedPenalty() != null ? breakdown.getTotalWeightedPenalty().doubleValue() : 0.0,
+                            breakdown.getFinalSafetyScore() != null ? breakdown.getFinalSafetyScore().doubleValue() : 100.0,
+                            breakdown.getPerformanceCategory()))
+                            .setFontSize(7.5f).setBold().setFontColor(TEXT_PRIMARY))
+                    .setBackgroundColor(new DeviceRgb(241, 245, 249)).setPadding(5).setTextAlignment(TextAlignment.CENTER);
+            scoreTable.addCell(reconCell);
+            doc.add(scoreTable);
+
+            // ==============================================================
+            // SECTION 2: VEHICLES OPERATED
+            // ==============================================================
+            addSectionHeading(doc, "2. Vehicles Operated", "Every distinct vehicle operated by this driver during the reporting period with usage telemetry");
+
+            Table vTable = new Table(UnitValue.createPercentArray(new float[]{8, 14, 12, 9, 11, 11, 9, 9, 9, 8})).useAllAvailableWidth();
+            addTableHeader(vTable, "Driver ID", "Driver Name", "Vehicle Number", "Trips", "Distance (km)", "Total Duration", "Total Alerts", "Overspeed", "Harsh Brake", "Other");
+            if (vehiclesOperated.isEmpty()) {
+                addEmptyTableRow(vTable, 10, "No vehicle records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (var v : vehiclesOperated) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    vTable.addCell(dataCell(v.getDriverCode() != null ? v.getDriverCode() : String.valueOf(v.getDriverId()), bg, false));
+                    vTable.addCell(dataCell(v.getDriverName(), bg, false));
+                    vTable.addCell(dataCell(v.getVehicleNumber(), bg, false));
+                    vTable.addCell(dataCell(String.valueOf(v.getTrips()), bg, true));
+                    vTable.addCell(dataCell(v.getDistanceKm() + " km", bg, true));
+                    vTable.addCell(dataCell(v.getFormattedDuration(), bg, true));
+                    vTable.addCell(dataCell(String.valueOf(v.getAlerts()), bg, true));
+                    vTable.addCell(dataCell(String.valueOf(v.getOverspeedCount()), bg, true));
+                    vTable.addCell(dataCell(String.valueOf(v.getHarshBrakingCount()), bg, true));
+                    vTable.addCell(dataCell(String.valueOf(v.getOtherAlertCount()), bg, true));
+                }
             }
-            document.add(dTable);
+            doc.add(vTable);
+
+            // ==============================================================
+            // SECTION 3: TRIP TRACKING
+            // ==============================================================
+            addSectionHeading(doc, "3. Trip Tracking", "Detailed trip execution log with GPS timestamps, verified road locations, speed telemetry, and status");
+
+            Table tTable = new Table(UnitValue.createPercentArray(new float[]{
+                    5.5f, 7.5f, 9.0f, 6.5f, 5.5f, 9.0f, 6.5f, 5.5f, 9.0f, 7.0f, 6.0f, 7.5f, 5.0f, 5.0f, 4.0f, 6.0f
+            })).useAllAvailableWidth();
+
+            addTableHeader(tTable,
+                    "Trip ID", "Vehicle", "Driver Name", "Start Date", "Start Time", "Start Location",
+                    "End Date", "End Time", "End Location", "Destination", "Distance", "Duration",
+                    "Avg Spd", "Max Spd", "Alerts", "Status");
+
+            if (trips.isEmpty()) {
+                addEmptyTableRow(tTable, 16, "No trip records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (TripTrackingDTO t : trips) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    tTable.addCell(dataCell("#" + t.getTripId(), bg, false));
+                    tTable.addCell(dataCell(t.getVehicleNumber(), bg, false));
+                    tTable.addCell(dataCell(t.getDriverName(), bg, false));
+                    tTable.addCell(dataCell(t.getTripStartDate(), bg, false));
+                    tTable.addCell(dataCell(t.getEntryStartTime(), bg, true));
+                    tTable.addCell(dataCell(t.getStartLocation(), bg, false));
+                    tTable.addCell(dataCell(t.getTripEndDate(), bg, false));
+                    tTable.addCell(dataCell(t.getExitEndTime(), bg, true));
+                    tTable.addCell(dataCell(t.getEndLocation(), bg, false));
+                    tTable.addCell(dataCell(t.getDestination(), bg, false));
+                    tTable.addCell(dataCell(t.getTotalDistanceKm() + " km", bg, true));
+                    tTable.addCell(dataCell(t.getTotalTripDurationFormatted(), bg, true));
+                    tTable.addCell(dataCell(t.getAverageSpeedKmph() + " km/h", bg, true));
+                    tTable.addCell(dataCell(t.getMaxSpeedKmph() + " km/h", bg, true));
+                    tTable.addCell(dataCell(String.valueOf(t.getAlertsDuringTrip()), bg, true));
+                    tTable.addCell(dataCell(t.getTripStatus(), bg, true));
+                }
+            }
+            doc.add(tTable);
+
+            // ==============================================================
+            // SECTION 4: ALERT SUMMARY
+            // ==============================================================
+            addSectionHeading(doc, "4. Alert Summary", "Aggregate safety violations by type, severity, and status, followed by event-level details");
+
+            // Aggregate Breakdown Tables Side-by-Side (Type Breakdown + Severity/Status Breakdown)
+            Table alertAggTable = new Table(UnitValue.createPercentArray(new float[]{50, 50})).useAllAvailableWidth();
+
+            // Left: Alert Type Counts
+            Table typeTable = new Table(UnitValue.createPercentArray(new float[]{65, 35})).useAllAvailableWidth();
+            addTableHeader(typeTable, "Alert Type", "Count");
+            if (alertTypeCounts.isEmpty()) {
+                addEmptyTableRow(typeTable, 2, "No alert records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (var e : alertTypeCounts.entrySet()) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    typeTable.addCell(dataCell(e.getKey(), bg, false));
+                    typeTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+                }
+            }
+            alertAggTable.addCell(new Cell().add(typeTable).setBorder(null).setPadding(2));
+
+            // Right: Severity & Status Breakdown
+            Table sevTable = new Table(UnitValue.createPercentArray(new float[]{50, 50})).useAllAvailableWidth();
+            addTableHeader(sevTable, "Category / Status", "Occurrences");
+            int sIdx = 0;
+            for (var e : alertSeverityCounts.entrySet()) {
+                DeviceRgb bg = (sIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                sevTable.addCell(dataCell("Severity: " + e.getKey(), bg, false));
+                sevTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+            }
+            for (var e : alertStatusCounts.entrySet()) {
+                DeviceRgb bg = (sIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                sevTable.addCell(dataCell("Status: " + e.getKey(), bg, false));
+                sevTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+            }
+            if (alertSeverityCounts.isEmpty() && alertStatusCounts.isEmpty()) {
+                addEmptyTableRow(sevTable, 2, "No alerts recorded in this period.");
+            }
+            alertAggTable.addCell(new Cell().add(sevTable).setBorder(null).setPadding(2));
+            doc.add(alertAggTable);
+
+            // Detailed Alert Summary Table (8 columns)
+            Paragraph aTblNote = new Paragraph("Alert Summary Table (Filtered for driver " + driver.getName() + ")")
+                    .setFontSize(8).setBold().setFontColor(HEADER_DARK).setMarginTop(6).setMarginBottom(3);
+            doc.add(aTblNote);
+
+            Table aTable = new Table(UnitValue.createPercentArray(new float[]{14, 10, 8, 22, 12, 8, 16, 10})).useAllAvailableWidth();
+            addTableHeader(aTable, "Vehicle Number", "Date", "Time", "Alert Type", "Severity", "Count", "Driver Name", "Status");
+            if (alertSummaries.isEmpty()) {
+                addEmptyTableRow(aTable, 8, "No alert records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (AlertReportItemDTO as : alertSummaries) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    aTable.addCell(dataCell(as.getVehicleNumber(), bg, false));
+                    aTable.addCell(dataCell(as.getDate(), bg, false));
+                    aTable.addCell(dataCell(as.getTime(), bg, true));
+                    aTable.addCell(dataCell(as.getAlertType(), bg, false));
+                    aTable.addCell(dataCell(as.getSeverity(), bg, true));
+                    aTable.addCell(dataCell(String.valueOf(as.getCount()), bg, true));
+                    aTable.addCell(dataCell(as.getDriverName(), bg, false));
+                    aTable.addCell(dataCell(as.getStatus(), bg, true));
+                }
+            }
+            doc.add(aTable);
         }
     }
 
-    private Cell headerCell(String text) {
-        return new Cell().add(new Paragraph(text).setFontSize(9).setBold().setFontColor(ColorConstants.WHITE))
-            .setBackgroundColor(PRIMARY_BLUE).setBorder(null).setPadding(5);
+    // ==================================================================
+    // 5. PDF GENERATION: FLEET REPORT (A4 Landscape, All 4 Sections)
+    // ==================================================================
+    private void generateFleetPdfV2(String filePath, String rType, LocalDate startDate, LocalDate endDate,
+                                    long entered, long exited, long totalTrips, double totalDistKm, String totalDurationFormatted,
+                                    long totalAlerts, BigDecimal avgScore, String fleetCategory,
+                                    List<OverallReportDTO.DriverAlertRow> driverRows,
+                                    List<DriverVehicleSummaryDTO> driverVehicleDetails,
+                                    List<TripTrackingDTO> trips,
+                                    List<AlertReportItemDTO> alertSummaries,
+                                    Map<String, Long> alertTypeSummary,
+                                    Map<String, Long> alertSeveritySummary,
+                                    Map<String, Long> alertStatusSummary) throws Exception {
+
+        String timestampStr = LocalDateTime.now().format(GEN_FMT);
+
+        try (PdfDocument pdfDoc = new PdfDocument(new PdfWriter(filePath));
+             Document doc = new Document(pdfDoc, PageSize.A4.rotate())) {
+
+            // Register automatic running page footer with page number
+            pdfDoc.addEventHandler(PdfDocumentEvent.END_PAGE, new PageFooterHandler(timestampStr));
+            doc.setMargins(20, 24, 26, 24);
+
+            // Report Header Banner
+            Table header = new Table(UnitValue.createPercentArray(new float[]{65, 35})).useAllAvailableWidth();
+            Cell titleCell = new Cell().add(new Paragraph("TRACKFLEET GPS FLEET TRACKING SYSTEM")
+                    .setFontSize(8).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .add(new Paragraph("Fleet Performance & Safety Report")
+                    .setFontSize(17).setBold().setFontColor(ColorConstants.WHITE))
+                    .add(new Paragraph("Overall Fleet Scope  ·  " + rType + " Performance Evaluation")
+                    .setFontSize(10).setFontColor(new DeviceRgb(191, 219, 254)))
+                    .setBackgroundColor(HEADER_DARK).setPadding(10).setBorder(null);
+            header.addCell(titleCell);
+
+            Cell dateCell = new Cell()
+                    .add(new Paragraph("REPORTING PERIOD").setFontSize(7).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .add(new Paragraph(startDate.format(DATE_FMT) + " to " + endDate.format(DATE_FMT))
+                    .setFontSize(10).setBold().setFontColor(ColorConstants.WHITE))
+                    .add(new Paragraph("Generated: " + timestampStr + " IST")
+                    .setFontSize(7).setFontColor(new DeviceRgb(148, 163, 184)))
+                    .setBackgroundColor(HEADER_DARK).setPadding(10).setTextAlignment(TextAlignment.RIGHT).setBorder(null);
+            header.addCell(dateCell);
+            doc.add(header);
+
+            // ==============================================================
+            // SECTION 1: OVERVIEW & SCORING
+            // ==============================================================
+            addSectionHeading(doc, "1. Overview & Scoring", "Fleet-wide key performance metrics, overall safety rating, and driver performance ranking");
+
+            // Executive KPI Cards (7 cards)
+            Table kpiTable = new Table(UnitValue.createPercentArray(new float[]{14, 14, 14, 15, 15, 14, 14})).useAllAvailableWidth();
+            addMetricCard(kpiTable, "Vehicles Entered", String.valueOf(entered), PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Vehicles Exited", String.valueOf(exited), SUCCESS_GREEN);
+            addMetricCard(kpiTable, "Total Trips", String.valueOf(totalTrips), PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Total Distance", String.format("%.2f km", totalDistKm), PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Total Duration", totalDurationFormatted, PRIMARY_BLUE);
+            addMetricCard(kpiTable, "Total Alerts", String.valueOf(totalAlerts), totalAlerts == 0 ? SUCCESS_GREEN : DANGER_RED);
+
+            DeviceRgb scoreCol = avgScore.compareTo(BigDecimal.valueOf(80)) >= 0 ? SUCCESS_GREEN
+                    : avgScore.compareTo(BigDecimal.valueOf(60)) >= 0 ? WARNING_AMBER : DANGER_RED;
+            addMetricCard(kpiTable, "Avg Safety Score", avgScore + " (" + fleetCategory + ")", scoreCol);
+            doc.add(kpiTable);
+
+            // Driver Performance & Vehicle-Utilization Ranking Table
+            Paragraph drvRankNote = new Paragraph("Driver Performance and Vehicle-Utilization Ranking (Sorted by Safety Score)")
+                    .setFontSize(8).setBold().setFontColor(HEADER_DARK).setMarginTop(6).setMarginBottom(3);
+            doc.add(drvRankNote);
+
+            Table dTable = new Table(UnitValue.createPercentArray(new float[]{9, 14, 18, 8, 11, 11, 8, 10, 11})).useAllAvailableWidth();
+            addTableHeader(dTable, "Driver ID", "Driver Name", "Vehicles Operated", "Trips", "Distance (km)", "Total Duration", "Alerts", "Safety Score", "Category");
+            if (driverRows.isEmpty()) {
+                addEmptyTableRow(dTable, 9, "No active driver records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (var row : driverRows) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    dTable.addCell(dataCell(row.getDriverCode() != null ? row.getDriverCode() : String.valueOf(row.getDriverId()), bg, false));
+                    dTable.addCell(dataCell(row.getDriverName(), bg, false));
+                    dTable.addCell(dataCell(row.getVehicles(), bg, false));
+                    dTable.addCell(dataCell(String.valueOf(row.getTripCount()), bg, true));
+                    dTable.addCell(dataCell(row.getTotalDistanceKm() + " km", bg, true));
+                    dTable.addCell(dataCell(row.getFormattedDuration(), bg, true));
+                    dTable.addCell(dataCell(String.valueOf(row.getTotalAlerts()), bg, true));
+                    dTable.addCell(dataCell(row.getSafetyScore() + " / 100", bg, true));
+                    dTable.addCell(dataCell(row.getPerformanceCategory(), bg, true));
+                }
+            }
+            doc.add(dTable);
+
+            // ==============================================================
+            // SECTION 2: VEHICLES OPERATED
+            // ==============================================================
+            addSectionHeading(doc, "2. Vehicles Operated", "Driver-vehicle historical utilization matrix showing all distinct driver and vehicle combinations");
+
+            Table dvTable = new Table(UnitValue.createPercentArray(new float[]{8, 14, 12, 9, 11, 11, 9, 9, 9, 8})).useAllAvailableWidth();
+            addTableHeader(dvTable, "Driver ID", "Driver Name", "Vehicle Number", "Trips", "Distance (km)", "Total Duration", "Total Alerts", "Overspeed", "Harsh Brake", "Other");
+            if (driverVehicleDetails.isEmpty()) {
+                addEmptyTableRow(dvTable, 10, "No vehicle records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (var dv : driverVehicleDetails) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    dvTable.addCell(dataCell(dv.getDriverCode() != null ? dv.getDriverCode() : String.valueOf(dv.getDriverId()), bg, false));
+                    dvTable.addCell(dataCell(dv.getDriverName(), bg, false));
+                    dvTable.addCell(dataCell(dv.getVehicleNumber(), bg, false));
+                    dvTable.addCell(dataCell(String.valueOf(dv.getTrips()), bg, true));
+                    dvTable.addCell(dataCell(dv.getDistanceKm() + " km", bg, true));
+                    dvTable.addCell(dataCell(dv.getFormattedDuration(), bg, true));
+                    dvTable.addCell(dataCell(String.valueOf(dv.getAlerts()), bg, true));
+                    dvTable.addCell(dataCell(String.valueOf(dv.getOverspeedCount()), bg, true));
+                    dvTable.addCell(dataCell(String.valueOf(dv.getHarshBrakingCount()), bg, true));
+                    dvTable.addCell(dataCell(String.valueOf(dv.getOtherAlertCount()), bg, true));
+                }
+            }
+            doc.add(dvTable);
+
+            // ==============================================================
+            // SECTION 3: TRIP TRACKING
+            // ==============================================================
+            addSectionHeading(doc, "3. Trip Tracking", "Detailed fleet trip logs with entry/exit timestamps, verified coordinates, telemetry speeds, and status");
+
+            Table tTable = new Table(UnitValue.createPercentArray(new float[]{
+                    5.5f, 7.5f, 9.0f, 6.5f, 5.5f, 9.0f, 6.5f, 5.5f, 9.0f, 7.0f, 6.0f, 7.5f, 5.0f, 5.0f, 4.0f, 6.0f
+            })).useAllAvailableWidth();
+
+            addTableHeader(tTable,
+                    "Trip ID", "Vehicle", "Driver Name", "Start Date", "Start Time", "Start Location",
+                    "End Date", "End Time", "End Location", "Destination", "Distance", "Duration",
+                    "Avg Spd", "Max Spd", "Alerts", "Status");
+
+            if (trips.isEmpty()) {
+                addEmptyTableRow(tTable, 16, "No trip records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (TripTrackingDTO t : trips) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    tTable.addCell(dataCell("#" + t.getTripId(), bg, false));
+                    tTable.addCell(dataCell(t.getVehicleNumber(), bg, false));
+                    tTable.addCell(dataCell(t.getDriverName(), bg, false));
+                    tTable.addCell(dataCell(t.getTripStartDate(), bg, false));
+                    tTable.addCell(dataCell(t.getEntryStartTime(), bg, true));
+                    tTable.addCell(dataCell(t.getStartLocation(), bg, false));
+                    tTable.addCell(dataCell(t.getTripEndDate(), bg, false));
+                    tTable.addCell(dataCell(t.getExitEndTime(), bg, true));
+                    tTable.addCell(dataCell(t.getEndLocation(), bg, false));
+                    tTable.addCell(dataCell(t.getDestination(), bg, false));
+                    tTable.addCell(dataCell(t.getTotalDistanceKm() + " km", bg, true));
+                    tTable.addCell(dataCell(t.getTotalTripDurationFormatted(), bg, true));
+                    tTable.addCell(dataCell(t.getAverageSpeedKmph() + " km/h", bg, true));
+                    tTable.addCell(dataCell(t.getMaxSpeedKmph() + " km/h", bg, true));
+                    tTable.addCell(dataCell(String.valueOf(t.getAlertsDuringTrip()), bg, true));
+                    tTable.addCell(dataCell(t.getTripStatus(), bg, true));
+                }
+            }
+            doc.add(tTable);
+
+            // ==============================================================
+            // SECTION 4: ALERT SUMMARY
+            // ==============================================================
+            addSectionHeading(doc, "4. Alert Summary", "Fleet alert statistics by type, severity, and resolution status, followed by full alert log");
+
+            // Aggregate Summary Tables Side-by-Side
+            Table alertAggTable = new Table(UnitValue.createPercentArray(new float[]{50, 50})).useAllAvailableWidth();
+
+            Table typeTable = new Table(UnitValue.createPercentArray(new float[]{65, 35})).useAllAvailableWidth();
+            addTableHeader(typeTable, "Alert Type", "Occurrences");
+            if (alertTypeSummary.isEmpty()) {
+                addEmptyTableRow(typeTable, 2, "No alerts found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (var e : alertTypeSummary.entrySet()) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    typeTable.addCell(dataCell(e.getKey(), bg, false));
+                    typeTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+                }
+            }
+            alertAggTable.addCell(new Cell().add(typeTable).setBorder(null).setPadding(2));
+
+            Table sevTable = new Table(UnitValue.createPercentArray(new float[]{50, 50})).useAllAvailableWidth();
+            addTableHeader(sevTable, "Severity / Status", "Occurrences");
+            int sIdx = 0;
+            for (var e : alertSeveritySummary.entrySet()) {
+                DeviceRgb bg = (sIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                sevTable.addCell(dataCell("Severity: " + e.getKey(), bg, false));
+                sevTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+            }
+            for (var e : alertStatusSummary.entrySet()) {
+                DeviceRgb bg = (sIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                sevTable.addCell(dataCell("Status: " + e.getKey(), bg, false));
+                sevTable.addCell(dataCell(String.valueOf(e.getValue()), bg, true));
+            }
+            if (alertSeveritySummary.isEmpty() && alertStatusSummary.isEmpty()) {
+                addEmptyTableRow(sevTable, 2, "No alerts recorded in this period.");
+            }
+            alertAggTable.addCell(new Cell().add(sevTable).setBorder(null).setPadding(2));
+            doc.add(alertAggTable);
+
+            // Detailed Alert Summary Table (8 columns)
+            Paragraph aTblNote = new Paragraph("Fleet Alert Incident Records")
+                    .setFontSize(8).setBold().setFontColor(HEADER_DARK).setMarginTop(6).setMarginBottom(3);
+            doc.add(aTblNote);
+
+            Table aTable = new Table(UnitValue.createPercentArray(new float[]{14, 10, 8, 22, 12, 8, 16, 10})).useAllAvailableWidth();
+            addTableHeader(aTable, "Vehicle Number", "Date", "Time", "Alert Type", "Severity", "Count", "Driver Name", "Status");
+            if (alertSummaries.isEmpty()) {
+                addEmptyTableRow(aTable, 8, "No alert records found for the selected reporting period.");
+            } else {
+                int rIdx = 0;
+                for (AlertReportItemDTO as : alertSummaries) {
+                    DeviceRgb bg = (rIdx++ % 2 == 0) ? ROW_EVEN : ROW_ODD;
+                    aTable.addCell(dataCell(as.getVehicleNumber(), bg, false));
+                    aTable.addCell(dataCell(as.getDate(), bg, false));
+                    aTable.addCell(dataCell(as.getTime(), bg, true));
+                    aTable.addCell(dataCell(as.getAlertType(), bg, false));
+                    aTable.addCell(dataCell(as.getSeverity(), bg, true));
+                    aTable.addCell(dataCell(String.valueOf(as.getCount()), bg, true));
+                    aTable.addCell(dataCell(as.getDriverName(), bg, false));
+                    aTable.addCell(dataCell(as.getStatus(), bg, true));
+                }
+            }
+            doc.add(aTable);
+        }
     }
 
-    private Cell dataCell(String text) {
-        return new Cell().add(new Paragraph(text != null ? text : "—").setFontSize(8))
-            .setBorder(null).setBackgroundColor(LIGHT_GRAY).setPadding(4);
+    // ==================================================================
+    // 6. HELPER METHODS: DURATION, DATES, LOCATION & FORMATTING
+    // ==================================================================
+
+    /**
+     * Converts seconds into strict "HHh MMm SSs" format.
+     * Examples: 00h 45m 12s, 02h 15m 30s.
+     */
+    public static String formatDuration(long seconds) {
+        if (seconds <= 0) return "00h 00m 00s";
+        long hours = seconds / 3600;
+        long minutes = (seconds % 3600) / 60;
+        long secs = seconds % 60;
+        return String.format("%02dh %02dm %02ds", hours, minutes, secs);
     }
 
+    private long calculateTripDurationSeconds(Trip t) {
+        if (t.getDurationSeconds() != null && t.getDurationSeconds() > 0) {
+            return t.getDurationSeconds().longValue();
+        }
+        if (t.getStartTime() != null && t.getEndTime() != null) {
+            return Duration.between(t.getStartTime(), t.getEndTime()).getSeconds();
+        }
+        return 0L;
+    }
 
-    // ------------------------------------------------------------------
-    // Date range resolution — handles all formats sent from the frontend:
-    //   1. Explicit startDate / endDate LocalDate fields
-    //   2. year + month integers  (month is 1-12)
-    //   3. month string  "YYYY-MM"
-    //   4. date string   "YYYY-MM-DD"  (used for DAILY reports)
-    //   5. Report-type-based default (current month)
-    // ------------------------------------------------------------------
+    private String formatLocation(String road, BigDecimal lat, BigDecimal lon, String fallback) {
+        if (road != null && !road.isBlank() && !"N/A".equalsIgnoreCase(road.trim())) {
+            return road.trim();
+        }
+        if (lat != null && lon != null) {
+            return String.format("%.4f, %.4f", lat.doubleValue(), lon.doubleValue());
+        }
+        return fallback;
+    }
+
+    /**
+     * Resolves start date based on request parameters using Asia/Kolkata timezone.
+     */
     private LocalDate resolveStartDate(ReportRequestDTO req) {
         if (req.getStartDate() != null) return req.getStartDate();
 
-        // year + month2 int fields (e.g. year=2026, month2=9)
+        // 1. ISO Week format: e.g. "2026-W38"
+        if (req.getWeek() != null && req.getWeek().contains("-W")) {
+            try {
+                String[] parts = req.getWeek().split("-W");
+                int year = Integer.parseInt(parts[0]);
+                int week = Integer.parseInt(parts[1]);
+                return LocalDate.of(year, 1, 4)
+                        .with(IsoFields.WEEK_OF_WEEK_BASED_YEAR, week)
+                        .with(java.time.DayOfWeek.MONDAY);
+            } catch (Exception e) {
+                log.warn("Could not parse week {}: {}", req.getWeek(), e.getMessage());
+            }
+        }
+
+        // 2. year + month2 (integer 1-12)
         if (req.getYear() != null && req.getMonth2() != null) {
             return LocalDate.of(req.getYear(), req.getMonth2(), 1);
         }
 
-        // year + month as numeric string (JSON int deserialized to String: "9")
-        if (req.getYear() != null && req.getMonth() != null) {
+        // 3. year + numeric month string
+        if (req.getYear() != null && req.getMonth() != null && !req.getMonth().contains("-")) {
             try {
                 int m = Integer.parseInt(req.getMonth().trim());
                 return LocalDate.of(req.getYear(), m, 1);
             } catch (NumberFormatException ignored) {}
         }
 
-        // year only — default to January
-        if (req.getYear() != null) {
-            return LocalDate.of(req.getYear(), 1, 1);
-        }
-
-        // month string "YYYY-MM"
+        // 4. month string "YYYY-MM"
         if (req.getMonth() != null && req.getMonth().contains("-")) {
             try {
                 String[] parts = req.getMonth().split("-");
@@ -374,256 +1173,122 @@ public class ReportService {
             } catch (Exception ignored) {}
         }
 
-        // date string "YYYY-MM-DD"
-        if (req.getDate() != null) {
-            try { return LocalDate.parse(req.getDate()); } catch (Exception ignored) {}
+        // 5. date string "YYYY-MM-DD" (DAILY)
+        if (req.getDate() != null && !req.getDate().isBlank()) {
+            try { return LocalDate.parse(req.getDate().trim()); } catch (Exception ignored) {}
         }
 
-        // Default: first day of last month (so demo data is always in range)
+        // Default: first day of last month
         return LocalDate.now().minusMonths(1).withDayOfMonth(1);
     }
 
+    /**
+     * Resolves end date ensuring exact period coverage.
+     */
     private LocalDate resolveEndDate(ReportRequestDTO req, LocalDate startDate) {
         if (req.getEndDate() != null) return req.getEndDate();
 
+        // If week was selected: end date is Sunday of that week (startDate + 6 days)
+        if (req.getWeek() != null && req.getWeek().contains("-W")) {
+            return startDate.plusDays(6);
+        }
+
         String rtype = req.getReportType() != null ? req.getReportType().toUpperCase() : "MONTHLY";
         return switch (rtype) {
-            case "DAILY"   -> startDate;                        // same day
-            case "WEEKLY"  -> startDate.plusDays(6);           // 7-day window
-            case "MONTHLY" -> startDate.withDayOfMonth(startDate.lengthOfMonth()); // full month
-            default        -> LocalDate.now();                  // CUSTOM or TRIP: up to today
+            case "DAILY"   -> startDate;
+            case "WEEKLY"  -> startDate.plusDays(6);
+            case "MONTHLY", "FLEET" -> startDate.withDayOfMonth(startDate.lengthOfMonth());
+            default -> (req.getMonth() != null) ? startDate.withDayOfMonth(startDate.lengthOfMonth()) : LocalDate.now();
         };
     }
 
-    // ------------------------------------------------------------------
-
-    private void generateDriverPdf(String filePath, Driver driver, LocalDate startDate, LocalDate endDate, String reportType) throws Exception {
-        DateTimeFormatter dFmt = DateTimeFormatter.ofPattern("dd MMM yyyy");
-        DateTimeFormatter tFmt = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
-
-        LocalDateTime from = startDate.atStartOfDay();
-        LocalDateTime to   = endDate.plusDays(1).atStartOfDay();
-
-        // Get data
-        List<DriverDailyStats> statsList = statsRepository.findByDriverIdAndStatDateBetweenOrderByStatDateAsc(driver.getId(), startDate, endDate);
-        List<Alert> alerts = alertRepository.findByDriverIdAndOccurredAtBetween(driver.getId(), from, to);
-        List<Trip> trips = tripRepository.findByDriverIdAndStartTimeBetweenOrderByStartTimeDesc(driver.getId(), from, to);
-
-        // Aggregate
-        int totalTrips = trips.size();
-        double totalDistKm = trips.stream().mapToDouble(t -> t.getDistanceKm() != null ? t.getDistanceKm().doubleValue() : 0).sum();
-        int overspeed = statsList.stream().mapToInt(s -> s.getOverspeedEvents() != null ? s.getOverspeedEvents() : 0).sum();
-        int harshBraking = statsList.stream().mapToInt(s -> s.getHarshBrakingEvents() != null ? s.getHarshBrakingEvents() : 0).sum();
-        int harshAccel = statsList.stream().mapToInt(s -> s.getHarshAccelerationEvents() != null ? s.getHarshAccelerationEvents() : 0).sum();
-        int nightDrivingSeconds = statsList.stream().mapToInt(s -> s.getNightDrivingSeconds() != null ? s.getNightDrivingSeconds() : 0).sum();
-        int fatigueEvents = statsList.stream().mapToInt(s -> s.getFatigueEvents() != null ? s.getFatigueEvents() : 0).sum();
-        OptionalDouble avgSafetyScore = statsList.stream().filter(s -> s.getSafetyScore() != null)
-            .mapToDouble(s -> s.getSafetyScore().doubleValue()).average();
-        double safetyScore = avgSafetyScore.isPresent() ? avgSafetyScore.getAsDouble() : 0;
-
-        // Alert type breakdown
-        Map<String, Long> alertsByType = alerts.stream()
-            .collect(Collectors.groupingBy(Alert::getAlertType, Collectors.counting()));
-
-        try (PdfDocument pdfDoc = new PdfDocument(new PdfWriter(filePath));
-             Document doc = new Document(pdfDoc, PageSize.A4)) {
-
-            doc.setMargins(36, 36, 36, 36);
-
-            // ---- HEADER BANNER ----
-            Table header = new Table(UnitValue.createPercentArray(new float[]{70, 30})).useAllAvailableWidth();
-            Cell titleCell = new Cell().add(new Paragraph("FLEET MANAGEMENT SYSTEM")
-                .setFontSize(9).setFontColor(new DeviceRgb(148, 163, 184)))
-                .add(new Paragraph("Driver Performance Report")
-                .setFontSize(22).setBold().setFontColor(ColorConstants.WHITE))
-                .add(new Paragraph(driver.getName() + " (" + driver.getCode() + ")")
-                .setFontSize(13).setFontColor(new DeviceRgb(147, 197, 253)))
-                .setBackgroundColor(HEADER_DARK).setPadding(16).setBorder(null);
-            header.addCell(titleCell);
-
-            Cell dateCell = new Cell()
-                .add(new Paragraph("Report Period").setFontSize(9).setFontColor(new DeviceRgb(148, 163, 184)))
-                .add(new Paragraph(startDate.format(dFmt) + "\nto\n" + endDate.format(dFmt))
-                    .setFontSize(11).setBold().setFontColor(ColorConstants.WHITE))
-                .add(new Paragraph("Generated: " + LocalDateTime.now().format(tFmt))
-                    .setFontSize(8).setFontColor(new DeviceRgb(148, 163, 184)))
-                .setBackgroundColor(HEADER_DARK).setPadding(16).setTextAlignment(TextAlignment.RIGHT).setBorder(null);
-            header.addCell(dateCell);
-            doc.add(header);
-
-            // ---- DRIVER INFO ----
-            addSectionTitle(doc, "Driver Information");
-            Table driverInfo = new Table(UnitValue.createPercentArray(new float[]{25, 25, 25, 25})).useAllAvailableWidth();
-            addInfoCard(driverInfo, "Driver Code", driver.getCode());
-            addInfoCard(driverInfo, "Full Name", driver.getName());
-            addInfoCard(driverInfo, "Phone", driver.getPhone() != null ? driver.getPhone() : "N/A");
-            addInfoCard(driverInfo, "License", driver.getLicenseNumber() != null ? driver.getLicenseNumber() : "N/A");
-            doc.add(driverInfo);
-
-            // ---- PERFORMANCE SUMMARY ----
-            addSectionTitle(doc, "Performance Summary");
-            Table perf = new Table(UnitValue.createPercentArray(new float[]{16, 16, 16, 16, 16, 16})).useAllAvailableWidth();
-            addMetricCard(perf, "Safety Score", String.format("%.1f/100", safetyScore), safetyScore >= 80 ? SUCCESS_GREEN : safetyScore >= 60 ? WARNING_AMBER : DANGER_RED);
-            addMetricCard(perf, "Total Trips", String.valueOf(totalTrips), PRIMARY_BLUE);
-            addMetricCard(perf, "Distance", String.format("%.1f km", totalDistKm), PRIMARY_BLUE);
-            addMetricCard(perf, "Overspeed", String.valueOf(overspeed), overspeed == 0 ? SUCCESS_GREEN : DANGER_RED);
-            addMetricCard(perf, "Harsh Braking", String.valueOf(harshBraking), harshBraking == 0 ? SUCCESS_GREEN : WARNING_AMBER);
-            addMetricCard(perf, "Night Driving", String.format("%.1f hrs", nightDrivingSeconds / 3600.0), nightDrivingSeconds == 0 ? SUCCESS_GREEN : WARNING_AMBER);
-            doc.add(perf);
-
-            // ---- SAFETY SCORE EXPLANATION ----
-            addSectionTitle(doc, "Safety Score Breakdown");
-            Paragraph scoreExplanation = new Paragraph()
-                .add("Safety Score Formula: 100")
-                .add(" - (Overspeed×5) - (Harsh Braking×4) - (Harsh Acceleration×4)")
-                .add(" - (Night Driving hrs×3) - (Fatigue×8) + (Clean Trips×1)")
-                .add("\nDeductions this period: ")
-                .add(String.format("Overspeed: -%d | Harsh Braking: -%d | Harsh Acceleration: -%d | Night Driving: -%.1f | Fatigue: -%d",
-                    overspeed * 5, harshBraking * 4, harshAccel * 4, nightDrivingSeconds / 3600.0 * 3, fatigueEvents * 8))
-                .setFontSize(10).setFontColor(TEXT_MUTED)
-                .setBackgroundColor(LIGHT_GRAY).setPadding(8).setMarginBottom(10);
-            doc.add(scoreExplanation);
-
-            // ---- ALERT SUMMARY ----
-            addSectionTitle(doc, "Alert Summary");
-            Table alertTable = new Table(UnitValue.createPercentArray(new float[]{60, 20, 20})).useAllAvailableWidth();
-            addTableHeader(alertTable, "Alert Type", "Count", "");
-            for (Map.Entry<String, Long> entry : alertsByType.entrySet()) {
-                alertTable.addCell(new Cell().add(new Paragraph(entry.getKey()).setFontSize(10)));
-                alertTable.addCell(new Cell().add(new Paragraph(String.valueOf(entry.getValue())).setFontSize(10).setBold()));
-                alertTable.addCell(new Cell().add(new Paragraph("").setFontSize(10)));
-            }
-            if (alertsByType.isEmpty()) {
-                Cell noAlerts = new Cell(1, 3).add(new Paragraph("No alerts in this period — excellent driving!").setFontSize(10).setFontColor(SUCCESS_GREEN));
-                alertTable.addCell(noAlerts);
-            }
-            doc.add(alertTable);
-
-            // ---- ENTRY/EXIT TRACKING (Trips Table) ----
-            addSectionTitle(doc, "Trip Entry/Exit Tracking");
-            Table tripTable = new Table(UnitValue.createPercentArray(new float[]{15, 20, 20, 15, 15, 15})).useAllAvailableWidth();
-            addTableHeader(tripTable, "Trip", "Entry (Start)", "Exit (End)", "Distance", "Duration", "Max Speed");
-            int idx = 1;
-            for (Trip t : trips.stream().limit(20).collect(Collectors.toList())) {
-                tripTable.addCell(new Cell().add(new Paragraph(String.valueOf(idx++)).setFontSize(9)));
-                tripTable.addCell(new Cell().add(new Paragraph(t.getStartTime() != null ? t.getStartTime().format(tFmt) : "N/A").setFontSize(9)));
-                tripTable.addCell(new Cell().add(new Paragraph(t.getEndTime() != null ? t.getEndTime().format(tFmt) : "Active").setFontSize(9)));
-                tripTable.addCell(new Cell().add(new Paragraph(t.getDistanceKm() != null ? t.getDistanceKm().setScale(1, RoundingMode.HALF_UP) + " km" : "N/A").setFontSize(9)));
-                tripTable.addCell(new Cell().add(new Paragraph(t.getDurationSeconds() != null ? (t.getDurationSeconds() / 60) + " min" : "N/A").setFontSize(9)));
-                tripTable.addCell(new Cell().add(new Paragraph(t.getMaxSpeedKmph() != null ? t.getMaxSpeedKmph().setScale(0, RoundingMode.HALF_UP) + " km/h" : "N/A").setFontSize(9)));
-            }
-            if (trips.isEmpty()) {
-                Cell noTrips = new Cell(1, 6).add(new Paragraph("No trips recorded in this period.").setFontSize(10).setFontColor(TEXT_MUTED));
-                tripTable.addCell(noTrips);
-            } else if (trips.size() > 20) {
-                Cell more = new Cell(1, 6).add(new Paragraph("... and " + (trips.size() - 20) + " more trips. See full list in the app.").setFontSize(9).setFontColor(TEXT_MUTED));
-                tripTable.addCell(more);
-            }
-            doc.add(tripTable);
-
-            // ---- FOOTER ----
-            doc.add(new Paragraph("\n"));
-            Paragraph footer = new Paragraph("GPS Fleet Tracking System | Report generated on " + LocalDateTime.now().format(tFmt) +
-                " | This report is system-generated. For queries, contact fleet@trackfleet.com")
-                .setFontSize(8).setFontColor(TEXT_MUTED).setTextAlignment(TextAlignment.CENTER);
-            doc.add(footer);
-        }
-    }
-
-    // ----------------------------------------------------------------
-    // FLEET PDF GENERATION
-    // ----------------------------------------------------------------
-    private void generateFleetPdf(String filePath, List<Driver> drivers, LocalDate startDate, LocalDate endDate) throws Exception {
-        DateTimeFormatter dFmt = DateTimeFormatter.ofPattern("dd MMM yyyy");
-        DateTimeFormatter tFmt = DateTimeFormatter.ofPattern("dd MMM yyyy HH:mm");
-        LocalDateTime from = startDate.atStartOfDay();
-        LocalDateTime to = endDate.plusDays(1).atStartOfDay();
-
-        try (PdfDocument pdfDoc = new PdfDocument(new PdfWriter(filePath));
-             Document doc = new Document(pdfDoc, PageSize.A4)) {
-            doc.setMargins(36, 36, 36, 36);
-
-            Table header = new Table(UnitValue.createPercentArray(new float[]{70, 30})).useAllAvailableWidth();
-            header.addCell(new Cell().add(new Paragraph("FLEET MANAGEMENT SYSTEM").setFontSize(9).setFontColor(new DeviceRgb(148, 163, 184)))
-                .add(new Paragraph("Fleet Monthly Report").setFontSize(22).setBold().setFontColor(ColorConstants.WHITE))
-                .add(new Paragraph(startDate.format(dFmt) + " to " + endDate.format(dFmt)).setFontSize(12).setFontColor(new DeviceRgb(147, 197, 253)))
-                .setBackgroundColor(HEADER_DARK).setPadding(16).setBorder(null));
-            header.addCell(new Cell().add(new Paragraph("Generated").setFontSize(9).setFontColor(new DeviceRgb(148, 163, 184)))
-                .add(new Paragraph(LocalDateTime.now().format(tFmt)).setFontSize(11).setFontColor(ColorConstants.WHITE))
-                .add(new Paragraph(drivers.size() + " Active Drivers").setFontSize(10).setFontColor(new DeviceRgb(147, 197, 253)))
-                .setBackgroundColor(HEADER_DARK).setPadding(16).setTextAlignment(TextAlignment.RIGHT).setBorder(null));
-            doc.add(header);
-
-            addSectionTitle(doc, "Driver Performance Ranking");
-            Table rankTable = new Table(UnitValue.createPercentArray(new float[]{8, 20, 15, 12, 12, 12, 11, 10})).useAllAvailableWidth();
-            addTableHeader(rankTable, "Rank", "Driver", "Code", "Trips", "Distance", "Safety Score", "Alerts", "Overspeed");
-
-            int rank = 1;
-            List<DriverDailyStats> allStats = new ArrayList<>();
-            for (Driver d : drivers) {
-                List<DriverDailyStats> dStats = statsRepository.findByDriverIdAndStatDateBetweenOrderByStatDateAsc(d.getId(), startDate, endDate);
-                allStats.addAll(dStats);
-
-                int trips = dStats.stream().mapToInt(s -> s.getTripCount() != null ? s.getTripCount() : 0).sum();
-                double dist = dStats.stream().mapToDouble(s -> s.getDistanceKm() != null ? s.getDistanceKm().doubleValue() : 0).sum();
-                OptionalDouble scoreOpt = dStats.stream().filter(s -> s.getSafetyScore() != null).mapToDouble(s -> s.getSafetyScore().doubleValue()).average();
-                double score = scoreOpt.isPresent() ? scoreOpt.getAsDouble() : 0;
-                long alertCount = alertRepository.countByDriverAndDateRange(d.getId(), from, to);
-                int overspeedEvts = dStats.stream().mapToInt(s -> s.getOverspeedEvents() != null ? s.getOverspeedEvents() : 0).sum();
-
-                DeviceRgb scoreColor = score >= 80 ? SUCCESS_GREEN : score >= 60 ? WARNING_AMBER : DANGER_RED;
-
-                rankTable.addCell(new Cell().add(new Paragraph("#" + rank++).setFontSize(9).setBold()));
-                rankTable.addCell(new Cell().add(new Paragraph(d.getName()).setFontSize(9)));
-                rankTable.addCell(new Cell().add(new Paragraph(d.getCode()).setFontSize(9)));
-                rankTable.addCell(new Cell().add(new Paragraph(String.valueOf(trips)).setFontSize(9)));
-                rankTable.addCell(new Cell().add(new Paragraph(String.format("%.1f km", dist)).setFontSize(9)));
-                rankTable.addCell(new Cell().add(new Paragraph(String.format("%.1f", score)).setFontSize(9).setBold().setFontColor(scoreColor)));
-                rankTable.addCell(new Cell().add(new Paragraph(String.valueOf(alertCount)).setFontSize(9)));
-                rankTable.addCell(new Cell().add(new Paragraph(String.valueOf(overspeedEvts)).setFontSize(9)));
-            }
-            doc.add(rankTable);
-
-            doc.add(new Paragraph("\n"));
-            doc.add(new Paragraph("GPS Fleet Tracking System | Fleet Report | " + LocalDateTime.now().format(tFmt))
-                .setFontSize(8).setFontColor(TEXT_MUTED).setTextAlignment(TextAlignment.CENTER));
-        }
-    }
-
-    // ---- Helpers ----
-    private void addSectionTitle(Document doc, String title) {
-        doc.add(new Paragraph(title)
-            .setFontSize(13).setBold().setFontColor(HEADER_DARK)
-            .setMarginTop(16).setMarginBottom(6)
-            .setBorderBottom(new com.itextpdf.layout.borders.SolidBorder(PRIMARY_BLUE, 1.5f)));
-    }
-
-    private void addInfoCard(Table table, String label, String value) {
+    private void addSectionHeading(Document doc, String title, String subtitle) {
+        Table secTable = new Table(UnitValue.createPercentArray(new float[]{100})).useAllAvailableWidth();
+        secTable.setMarginTop(8).setMarginBottom(3);
         Cell cell = new Cell()
-            .add(new Paragraph(label).setFontSize(8).setFontColor(TEXT_MUTED))
-            .add(new Paragraph(value != null ? value : "N/A").setFontSize(11).setBold())
-            .setBackgroundColor(LIGHT_GRAY).setPadding(8).setBorder(null).setMargin(2);
-        table.addCell(cell);
+                .add(new Paragraph(title).setFontSize(10.5f).setBold().setFontColor(PRIMARY_BLUE).setMarginBottom(1))
+                .add(new Paragraph(subtitle).setFontSize(6.5f).setFontColor(TEXT_MUTED))
+                .setBorder(null)
+                .setBorderBottom(new SolidBorder(PRIMARY_BLUE, 1.2f))
+                .setPaddingBottom(3)
+                .setPaddingLeft(0);
+        secTable.addCell(cell);
+        doc.add(secTable);
     }
 
     private void addMetricCard(Table table, String label, String value, DeviceRgb color) {
         Cell cell = new Cell()
-            .add(new Paragraph(label).setFontSize(8).setFontColor(TEXT_MUTED))
-            .add(new Paragraph(value).setFontSize(14).setBold().setFontColor(color))
-            .setBackgroundColor(LIGHT_GRAY).setPadding(8).setBorder(null).setMargin(2)
-            .setTextAlignment(TextAlignment.CENTER);
+                .add(new Paragraph(label).setFontSize(6.5f).setFontColor(TEXT_MUTED))
+                .add(new Paragraph(value).setFontSize(10.5f).setBold().setFontColor(color))
+                .setBackgroundColor(ROW_EVEN)
+                .setBorder(new SolidBorder(BORDER_COLOR, 0.5f))
+                .setPadding(4)
+                .setTextAlignment(TextAlignment.CENTER);
         table.addCell(cell);
     }
 
     private void addTableHeader(Table table, String... headers) {
         for (String h : headers) {
-            table.addHeaderCell(new Cell().add(new Paragraph(h)
-                .setFontSize(9).setBold().setFontColor(ColorConstants.WHITE))
-                .setBackgroundColor(PRIMARY_BLUE).setPadding(6).setBorder(null));
+            table.addHeaderCell(new Cell()
+                    .add(new Paragraph(h).setFontSize(6.5f).setBold().setFontColor(ColorConstants.WHITE))
+                    .setBackgroundColor(TABLE_HEADER)
+                    .setBorder(new SolidBorder(BORDER_COLOR, 0.5f))
+                    .setPadding(3)
+                    .setTextAlignment(TextAlignment.CENTER));
         }
+    }
+
+    private Cell dataCell(String text, DeviceRgb bgColor, boolean alignRight) {
+        return new Cell()
+                .add(new Paragraph(text != null && !text.isBlank() ? text : "—").setFontSize(6.5f).setFontColor(TEXT_PRIMARY))
+                .setBackgroundColor(bgColor)
+                .setBorder(new SolidBorder(BORDER_COLOR, 0.5f))
+                .setPadding(2.5f)
+                .setTextAlignment(alignRight ? TextAlignment.RIGHT : TextAlignment.LEFT);
+    }
+
+    private void addEmptyTableRow(Table table, int colspan, String message) {
+        table.addCell(new Cell(1, colspan)
+                .add(new Paragraph(message).setFontSize(7).setFontColor(TEXT_MUTED).setItalic())
+                .setBackgroundColor(ROW_EVEN)
+                .setBorder(new SolidBorder(BORDER_COLOR, 0.5f))
+                .setPadding(8)
+                .setTextAlignment(TextAlignment.CENTER));
     }
 
     public String getReportFilePath(String reportId) {
         return reportsOutputDir + File.separator + reportId + ".pdf";
+    }
+
+    // ==================================================================
+    // 7. RUNNING PAGE FOOTER EVENT HANDLER
+    // ==================================================================
+    private static class PageFooterHandler implements IEventHandler {
+        private final String generatedTimestamp;
+
+        public PageFooterHandler(String generatedTimestamp) {
+            this.generatedTimestamp = generatedTimestamp;
+        }
+
+        @Override
+        public void handleEvent(Event event) {
+            PdfDocumentEvent docEvent = (PdfDocumentEvent) event;
+            PdfDocument pdfDoc = docEvent.getDocument();
+            PdfPage page = docEvent.getPage();
+            int pageNumber = pdfDoc.getPageNumber(page);
+            Rectangle pageSize = page.getPageSize();
+
+            PdfCanvas pdfCanvas = new PdfCanvas(page.newContentStreamAfter(), page.getResources(), pdfDoc);
+            Canvas canvas = new Canvas(pdfCanvas, pageSize);
+
+            String footerText = String.format("TrackFleet GPS Fleet Tracking System  ·  Page %d  ·  Generated: %s IST  ·  Confidential Enterprise Report",
+                    pageNumber, generatedTimestamp);
+
+            canvas.showTextAligned(
+                    new Paragraph(footerText).setFontSize(6.5f).setFontColor(TEXT_MUTED),
+                    pageSize.getWidth() / 2, 12, TextAlignment.CENTER
+            );
+            canvas.close();
+        }
     }
 }

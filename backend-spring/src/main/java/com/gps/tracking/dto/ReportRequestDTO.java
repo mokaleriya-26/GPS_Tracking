@@ -12,9 +12,10 @@ public class ReportRequestDTO {
     private String vehicleCode;
     private LocalDate startDate;
     private LocalDate endDate;
-    private String month;   // e.g. "2026-09" for MONTHLY (alternative to year+month ints)
-    private Integer year;   // e.g. 2026 — used to derive startDate for MONTHLY/WEEKLY
-    private Integer month2; // integer month (1–12) — used with year to derive startDate
-    private String date;    // e.g. "2026-09-15" for DAILY reports
+    private String month;   // e.g. "2026-09" for MONTHLY
+    private String week;    // e.g. "2026-W41" for WEEKLY
+    private Integer year;   // e.g. 2026
+    private Integer month2; // integer month (1–12)
+    private String date;    // e.g. "2026-10-12" for DAILY reports
     private Long tripId;
 }

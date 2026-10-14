@@ -6,6 +6,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -23,43 +24,62 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     List<Alert> findByDriverIdAndOccurredAtBetween(Long driverId, LocalDateTime from, LocalDateTime to);
     List<Alert> findByVehicleIdAndOccurredAtBetween(Long vehicleId, LocalDateTime from, LocalDateTime to);
 
-    @Query("SELECT COUNT(a) FROM Alert a WHERE a.driver.id = :driverId AND a.occurredAt BETWEEN :from AND :to")
+    @Query("SELECT DISTINCT a FROM Alert a LEFT JOIN a.trip t " +
+           "WHERE (a.driver.id = :driverId OR (a.driver IS NULL AND t.driver.id = :driverId)) " +
+           "AND a.occurredAt >= :from AND a.occurredAt < :to ORDER BY a.occurredAt DESC")
+    List<Alert> findAlertsByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT DISTINCT a FROM Alert a WHERE a.occurredAt >= :from AND a.occurredAt < :to ORDER BY a.occurredAt DESC")
+    List<Alert> findAlertsInDateRange(LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(DISTINCT a) FROM Alert a LEFT JOIN a.trip t " +
+           "WHERE (a.driver.id = :driverId OR (a.driver IS NULL AND t.driver.id = :driverId)) " +
+           "AND a.occurredAt >= :from AND a.occurredAt < :to")
+    long countAlertsByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.driver.id = :driverId AND a.occurredAt >= :from AND a.occurredAt < :to")
     long countByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
-    /** Count only live (non-silenced) alerts — used for safety scoring so CSV imports don't penalise drivers */
-    @Query("SELECT COUNT(a) FROM Alert a WHERE a.driver.id = :driverId AND a.occurredAt BETWEEN :from AND :to AND a.deliveryStatus <> 'SILENCED'")
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.driver.id = :driverId AND a.occurredAt >= :from AND a.occurredAt < :to AND a.deliveryStatus <> 'SILENCED'")
     long countLiveByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
-    @Query("SELECT a.alertType, COUNT(a) FROM Alert a WHERE a.driver.id = :driverId AND a.occurredAt BETWEEN :from AND :to AND a.deliveryStatus <> 'SILENCED' GROUP BY a.alertType")
+    @Query("SELECT a.alertType, COUNT(DISTINCT a) FROM Alert a LEFT JOIN a.trip t " +
+           "WHERE (a.driver.id = :driverId OR (a.driver IS NULL AND t.driver.id = :driverId)) " +
+           "AND a.occurredAt >= :from AND a.occurredAt < :to GROUP BY a.alertType ORDER BY COUNT(DISTINCT a) DESC")
+    List<Object[]> countAlertsByTypeForDriver(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT a.alertType, COUNT(a) FROM Alert a " +
+           "WHERE a.driver.id = :driverId AND a.occurredAt >= :from AND a.occurredAt < :to AND a.deliveryStatus <> 'SILENCED' " +
+           "GROUP BY a.alertType")
     List<Object[]> countByTypeForDriver(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT COUNT(DISTINCT a) FROM Alert a LEFT JOIN a.trip t " +
+           "WHERE a.vehicle.id = :vehicleId " +
+           "AND (a.driver.id = :driverId OR (a.driver IS NULL AND t.driver.id = :driverId)) " +
+           "AND a.occurredAt >= :from AND a.occurredAt < :to")
+    long countAlertsByVehicleAndDriverAndDateRange(Long vehicleId, Long driverId, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COUNT(a) FROM Alert a WHERE a.status = 'OPEN'")
     long countOpenAlerts();
 
-    /** Total alerts in a date range (all statuses — used for Overall Report) */
-    @Query("SELECT COUNT(a) FROM Alert a WHERE a.occurredAt BETWEEN :from AND :to")
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.occurredAt >= :from AND a.occurredAt < :to")
     long countInDateRange(LocalDateTime from, LocalDateTime to);
 
-    /** Alert counts grouped by type for a date range (Overall Report — alert type summary) */
-    @Query("SELECT a.alertType, COUNT(a) FROM Alert a WHERE a.occurredAt BETWEEN :from AND :to GROUP BY a.alertType ORDER BY COUNT(a) DESC")
+    @Query("SELECT a.alertType, COUNT(a) FROM Alert a WHERE a.occurredAt >= :from AND a.occurredAt < :to GROUP BY a.alertType ORDER BY COUNT(a) DESC")
     List<Object[]> countByTypeInDateRange(LocalDateTime from, LocalDateTime to);
 
-    /**
-     * Per-driver alert breakdown by type for a date range.
-     * Returns [driverId, driverCode, driverName, alertType, count]
-     */
     @Query("""
-        SELECT a.driver.id, a.driver.code, a.driver.name, a.alertType, COUNT(a)
-        FROM Alert a
-        WHERE a.driver IS NOT NULL AND a.occurredAt BETWEEN :from AND :to
-        GROUP BY a.driver.id, a.driver.code, a.driver.name, a.alertType
-        ORDER BY a.driver.name, a.alertType
+        SELECT COALESCE(a.driver.id, t.driver.id), COALESCE(a.driver.code, t.driver.code), COALESCE(a.driver.name, t.driver.name), a.alertType, COUNT(DISTINCT a)
+        FROM Alert a LEFT JOIN a.trip t
+        WHERE (a.driver IS NOT NULL OR t.driver IS NOT NULL) AND a.occurredAt >= :from AND a.occurredAt < :to
+        GROUP BY COALESCE(a.driver.id, t.driver.id), COALESCE(a.driver.code, t.driver.code), COALESCE(a.driver.name, t.driver.name), a.alertType
+        ORDER BY COALESCE(a.driver.name, t.driver.name), a.alertType
         """)
     List<Object[]> driverAlertBreakdownInDateRange(LocalDateTime from, LocalDateTime to);
 
     long countByVehicleId(Long vehicleId);
 
-    @Query("SELECT COUNT(a) FROM Alert a WHERE a.vehicle.id = :vehicleId AND a.occurredAt BETWEEN :from AND :to")
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.vehicle.id = :vehicleId AND a.occurredAt >= :from AND a.occurredAt < :to")
     long countByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT a.alertType, COUNT(a) FROM Alert a WHERE a.vehicle.id = :vehicleId GROUP BY a.alertType ORDER BY COUNT(a) DESC")
@@ -68,7 +88,7 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
     List<Object[]> findTopVehiclesByAlertCount();
 
-    @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL AND a.occurredAt BETWEEN :from AND :to GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
+    @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL AND a.occurredAt >= :from AND a.occurredAt < :to GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
     List<Object[]> findTopVehiclesByAlertCountInDateRange(LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber, COUNT(a) FROM Alert a WHERE a.vehicle IS NOT NULL AND LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) GROUP BY a.vehicle.id, a.vehicle.code, a.vehicle.registrationNumber ORDER BY COUNT(a) DESC")
@@ -77,7 +97,7 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%'))")
     long countByAlertTypeLike(String alertType);
 
-    @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) AND a.occurredAt BETWEEN :from AND :to")
+    @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) AND a.occurredAt >= :from AND a.occurredAt < :to")
     long countByAlertTypeLikeInDateRange(String alertType, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COUNT(a) FROM Alert a WHERE LOWER(a.alertType) LIKE LOWER(CONCAT('%', :alertType, '%')) AND a.status = 'OPEN'")
@@ -89,7 +109,7 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = :severity")
     long countBySeverity(String severity);
 
-    @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = :severity AND a.occurredAt BETWEEN :from AND :to")
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = :severity AND a.occurredAt >= :from AND a.occurredAt < :to")
     long countBySeverityInDateRange(String severity, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COUNT(a) FROM Alert a WHERE a.severity = 'CRITICAL' AND a.status = 'OPEN'")

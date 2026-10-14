@@ -55,6 +55,29 @@ public class ReportController {
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
+    @PostMapping("/fleet/daily")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetDaily(@RequestBody ReportRequestDTO req) {
+        req.setReportType("DAILY");
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
+    }
+
+    @PostMapping("/fleet/weekly")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetWeekly(@RequestBody ReportRequestDTO req) {
+        req.setReportType("WEEKLY");
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
+    }
+
+    @PostMapping("/fleet/custom")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetCustom(@RequestBody ReportRequestDTO req) {
+        req.setReportType("CUSTOM");
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
+    }
+
+    @PostMapping("/fleet")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleet(@RequestBody ReportRequestDTO req) {
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
+    }
+
     /**
      * POST /api/reports/overall
      * Generates an overall fleet summary for a given period.

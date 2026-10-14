@@ -1,11 +1,13 @@
 package com.gps.tracking.repository;
 
 import com.gps.tracking.entity.Trip;
+import com.gps.tracking.entity.Vehicle;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -16,45 +18,62 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
     List<Trip> findByVehicleIdAndStartTimeBetweenOrderByStartTimeDesc(Long vehicleId, LocalDateTime from, LocalDateTime to);
     List<Trip> findByDriverIdAndStartTimeBetweenOrderByStartTimeDesc(Long driverId, LocalDateTime from, LocalDateTime to);
 
-    @Query("SELECT COUNT(t) FROM Trip t WHERE t.driver.id = :driverId AND t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COUNT(t) FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to")
     long countByDriverIdAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COUNT(t) FROM Trip t WHERE t.driver.id = :driverId")
     long countByDriverId(Long driverId);
 
-    @Query("SELECT SUM(t.distanceKm) FROM Trip t WHERE t.driver.id = :driverId AND t.startTime BETWEEN :from AND :to")
+    @Query("SELECT SUM(t.distanceKm) FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to")
     Double sumDistanceByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
     /** Distinct vehicles that started at least one trip in the period (entry events) */
-    @Query("SELECT COUNT(DISTINCT t.vehicle.id) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COUNT(DISTINCT t.vehicle.id) FROM Trip t WHERE t.startTime >= :from AND t.startTime < :to")
     long countDistinctVehiclesWithTripStarted(LocalDateTime from, LocalDateTime to);
 
     /** Distinct vehicles that completed at least one trip in the period (exit events — endTime not null) */
-    @Query("SELECT COUNT(DISTINCT t.vehicle.id) FROM Trip t WHERE t.endTime IS NOT NULL AND t.endTime BETWEEN :from AND :to")
+    @Query("SELECT COUNT(DISTINCT t.vehicle.id) FROM Trip t WHERE t.endTime IS NOT NULL AND t.endTime >= :from AND t.endTime < :to")
     long countDistinctVehiclesWithTripCompleted(LocalDateTime from, LocalDateTime to);
 
     /** Trips that started in the given date range */
-    @Query("SELECT t FROM Trip t WHERE t.startTime BETWEEN :from AND :to ORDER BY t.startTime DESC")
+    @Query("SELECT t FROM Trip t WHERE t.startTime >= :from AND t.startTime < :to ORDER BY t.startTime DESC")
     List<Trip> findByStartTimeBetween(LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT t FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to ORDER BY t.startTime DESC")
+    List<Trip> findTripsByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT DISTINCT t.vehicle FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to")
+    List<Vehicle> findDistinctVehiclesByDriverIdAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT t.vehicle.registrationNumber, COUNT(t), COALESCE(SUM(t.distanceKm), 0), t.vehicle.id " +
+           "FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to " +
+           "GROUP BY t.vehicle.registrationNumber, t.vehicle.id ORDER BY COUNT(t) DESC")
+    List<Object[]> getDriverVehicleStats(Long driverId, LocalDateTime from, LocalDateTime to);
+
+    @Query("SELECT t.driver.id, t.driver.name, t.vehicle.registrationNumber, COUNT(t), COALESCE(SUM(t.distanceKm), 0), t.vehicle.id " +
+           "FROM Trip t WHERE t.driver IS NOT NULL AND t.startTime >= :from AND t.startTime < :to " +
+           "GROUP BY t.driver.id, t.driver.name, t.vehicle.registrationNumber, t.vehicle.id " +
+           "ORDER BY t.driver.name, COUNT(t) DESC")
+    List<Object[]> getFleetDriverVehicleStats(LocalDateTime from, LocalDateTime to);
 
     long countByVehicleId(Long vehicleId);
 
-    @Query("SELECT COUNT(t) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COUNT(t) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime >= :from AND t.startTime < :to")
     long countByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.vehicle.id = :vehicleId")
     Double sumDistanceByVehicleId(Long vehicleId);
 
-    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.vehicle.id = :vehicleId AND t.startTime >= :from AND t.startTime < :to")
     Double sumDistanceByVehicleIdAndDateRange(Long vehicleId, LocalDateTime from, LocalDateTime to);
 
     @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t")
     Double sumTotalDistance();
 
-    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.startTime >= :from AND t.startTime < :to")
     Double sumDistanceInDateRange(LocalDateTime from, LocalDateTime to);
 
-    @Query("SELECT COUNT(t) FROM Trip t WHERE t.startTime BETWEEN :from AND :to")
+    @Query("SELECT COUNT(t) FROM Trip t WHERE t.startTime >= :from AND t.startTime < :to")
     long countInDateRange(LocalDateTime from, LocalDateTime to);
 
     @Query("""
