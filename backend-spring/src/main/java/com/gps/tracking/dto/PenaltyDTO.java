@@ -23,6 +23,14 @@ public class PenaltyDTO {
     private Long vehicleId;
     private String vehicleRegistration;
     private String penaltyType; // MANUAL_SAFETY_DEDUCTION, FINANCIAL_FINE, POLICY_VIOLATION, WARNING
+    private Integer occurrenceNumber;
+    private String classification; // WARNING, PENALTY
+    private BigDecimal basePenalty;
+    private BigDecimal penaltyIncrement;
+    private LocalDateTime calculationTimestamp;
+    private String processingStatus;
+    private String notificationStatus;
+    private BigDecimal driverCumulativePenalties;
     private String reason;
     private BigDecimal penaltyPoints;
     private BigDecimal monetaryAmount;

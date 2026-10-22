@@ -23,3 +23,9 @@ export const revokePenalty = (id, reason) =>
   api.put(`/api/penalties/${id}/revoke`, { reason }, {
     headers: { 'X-User-Role': 'MANAGER', 'X-User-Name': 'Fleet Manager' }
   }).then(r => r.data?.data);
+
+export const getFleetPenaltySummary = () =>
+  api.get('/api/penalties/summary').then(r => r.data?.data);
+
+export const getDriverPenaltySummary = (driverId) =>
+  api.get(`/api/penalties/driver/${driverId}/summary`).then(r => r.data?.data);

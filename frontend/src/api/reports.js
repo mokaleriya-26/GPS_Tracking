@@ -25,5 +25,11 @@ export const generateFleetReport = (body) =>
 export const generateOverallReport = (body) =>
   api.post('/api/reports/overall', body).then(r => r.data?.data);
 
+export const generateDriverAlertReport = (driverId, body) =>
+  api.post(`/api/reports/driver/${driverId}/alert-based`, body).then(r => r.data?.data);
+
+export const generateFleetAlertReport = (body) =>
+  api.post('/api/reports/fleet/alert-based', body).then(r => r.data?.data);
+
 export const getPdfUrl = (reportId) => `${BASE}/api/reports/${reportId}/pdf`;
 export const getDownloadUrl = (reportId) => `${BASE}/api/reports/${reportId}/download`;

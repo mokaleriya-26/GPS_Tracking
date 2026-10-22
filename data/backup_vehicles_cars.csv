@@ -1,0 +1,4 @@
+id,code,imei,registration_number,vehicle_type,make_model,fuel_type,tank_capacity_litres,rated_mileage_kmpl,odometer_km,driver_id,active,created_at
+7,VH007,863992438868245,MH50BH1525,Car,Eicher Pro,Petrol,52.70,19.40,133927.80,3,t,2026-10-03 19:39:42.437815+05:30
+11,VH011,868045452278388,MH50WL2827,Car,Eicher Pro,Diesel,40.20,17.20,113558.50,15,t,2026-10-03 19:39:42.437815+05:30
+13,VH013,867839620274068,MH21RA2832,Car,Toyota Innova,Diesel,54.50,15.70,30238.40,2,t,2026-10-03 19:39:42.437815+05:30

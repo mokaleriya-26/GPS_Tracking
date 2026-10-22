@@ -29,7 +29,7 @@ public class PenaltyController {
     }
 
     @PutMapping("/configs/{id}")
-    @Operation(summary = "Update alert penalty weight and default fine (Manager only)")
+    @Operation(summary = "Update alert penalty weight, default fine, increment, threshold (Manager only)")
     public ResponseEntity<ApiResponse<AlertPenaltyConfigDTO>> updateConfig(
             @PathVariable Long id,
             @RequestBody Map<String, Object> body,
@@ -40,8 +40,21 @@ public class PenaltyController {
                 ? new BigDecimal(body.get("weight").toString()) : null;
         BigDecimal fine = body.containsKey("defaultFineAmount") && body.get("defaultFineAmount") != null
                 ? new BigDecimal(body.get("defaultFineAmount").toString()) : null;
+        BigDecimal increment = body.containsKey("penaltyIncrement") && body.get("penaltyIncrement") != null
+                ? new BigDecimal(body.get("penaltyIncrement").toString()) : null;
+        Integer threshold = body.containsKey("warningThreshold") && body.get("warningThreshold") != null
+                ? Integer.valueOf(body.get("warningThreshold").toString()) : null;
+        Boolean enabled = body.containsKey("penaltyEnabled") && body.get("penaltyEnabled") != null
+                ? Boolean.valueOf(body.get("penaltyEnabled").toString()) : null;
 
-        return ResponseEntity.ok(ApiResponse.ok(penaltyService.updateAlertPenaltyConfig(id, weight, fine, user)));
+        return ResponseEntity.ok(ApiResponse.ok(
+                penaltyService.updateAlertPenaltyConfig(id, weight, fine, increment, threshold, enabled, user)));
+    }
+
+    @GetMapping("/summary")
+    @Operation(summary = "Get fleet-level progressive penalty analytics summary")
+    public ResponseEntity<ApiResponse<FleetPenaltySummaryDTO>> getFleetSummary() {
+        return ResponseEntity.ok(ApiResponse.ok(penaltyService.getFleetPenaltySummary()));
     }
 
     @GetMapping
@@ -51,9 +64,19 @@ public class PenaltyController {
     }
 
     @GetMapping("/driver/{driverId}")
-    @Operation(summary = "Get penalty history for a driver")
-    public ResponseEntity<ApiResponse<List<PenaltyDTO>>> getDriverPenalties(@PathVariable Long driverId) {
-        return ResponseEntity.ok(ApiResponse.ok(penaltyService.getPenaltiesForDriver(driverId)));
+    @Operation(summary = "Get penalty history for a driver with optional filters")
+    public ResponseEntity<ApiResponse<List<PenaltyDTO>>> getDriverPenalties(
+            @PathVariable Long driverId,
+            @RequestParam(required = false) String alertType,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime from,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime to) {
+        return ResponseEntity.ok(ApiResponse.ok(penaltyService.getPenaltiesForDriverFiltered(driverId, alertType, from, to)));
+    }
+
+    @GetMapping("/driver/{driverId}/summary")
+    @Operation(summary = "Get comprehensive penalty accounting summary for a driver")
+    public ResponseEntity<ApiResponse<DriverPenaltySummaryDTO>> getDriverPenaltySummary(@PathVariable Long driverId) {
+        return ResponseEntity.ok(ApiResponse.ok(penaltyService.getDriverPenaltySummary(driverId)));
     }
 
     @PostMapping

@@ -19,6 +19,7 @@ public class AlertDTO {
     private String driverName;
     private String driverCode;
     private String driverPhone;
+    private String driverEmail;
     private Long tripId;
     private LocalDateTime occurredAt;
     private BigDecimal latitude;
@@ -55,5 +56,11 @@ public class AlertDTO {
     private String driverSmsRequestId;
     private String smsError;
     private Boolean isSilenced; // true when status=HISTORICAL (maps to old is_silenced)
+    // Progressive Warning & Penalty fields
+    private Integer occurrenceNumber;
+    private BigDecimal penaltyAmount;
+    private String penaltyClassification;
+    private BigDecimal driverCumulativePenalties;
+    private Boolean isSimulation;
     private LocalDateTime createdAt;
 }

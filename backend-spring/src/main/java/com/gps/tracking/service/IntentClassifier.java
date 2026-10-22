@@ -21,14 +21,14 @@ import java.util.regex.Pattern;
  *   GREETING, FLEET_SUMMARY, DRIVER_RANKING, DRIVER_RECOMMENDATION,
  *   DRIVER_STATS, DRIVER_REPORT, VEHICLE_STATS, VEHICLE_ALERT_ANALYSIS,
  *   OVERALL_REPORT, FLEET_REPORT, REPORT_CLARIFICATION, ALERT_QUERY,
- *   TRIP_QUERY, ENTRY_EXIT, COMPARE_DRIVERS, UNKNOWN
+ *   ALERT_REPORT, TRIP_QUERY, ENTRY_EXIT, COMPARE_DRIVERS, UNKNOWN
  *
  * Extracted entities:
  *   - scope: DRIVER, FLEET, VEHICLE, UNKNOWN
  *   - period: DAILY, WEEKLY, MONTHLY, CUSTOM, ALL_TIME
  *   - driver code & name hints
  *   - vehicle code & registration number
- *   - alert type
+ *   - alert type, severity hint, status hint
  *   - concrete date ranges (Asia/Kolkata timezone)
  *   - ranking limit
  */
@@ -50,16 +50,22 @@ public class IntentClassifier {
         DRIVER_RANKING,
         DRIVER_RECOMMENDATION,
         DRIVER_STATS,
+        DRIVER_ALERT_COUNT,
         DRIVER_REPORT,
         VEHICLE_STATS,
         VEHICLE_ALERT_ANALYSIS,
+        VEHICLE_RANKING,
         OVERALL_REPORT,
         FLEET_REPORT,
         REPORT_CLARIFICATION,
         ALERT_QUERY,
+        ALERT_REPORT,
         TRIP_QUERY,
         ENTRY_EXIT,
         COMPARE_DRIVERS,
+        MAINTENANCE_QUERY,
+        COST_QUERY,
+        PENALTY_QUERY,
         UNKNOWN
     }
 
@@ -84,6 +90,8 @@ public class IntentClassifier {
         private final String vehicleCodeHint;  // e.g. "VH003"
         private final String vehicleRegHint;   // e.g. "MH03AC4582"
         private final String alertTypeHint;    // e.g. "Overspeed Alert"
+        private final String severityHint;     // e.g. "CRITICAL", "WARNING", "INFO"
+        private final String statusHint;       // e.g. "OPEN", "RESOLVED", "HISTORICAL"
         private final LocalDate dateFrom;
         private final LocalDate dateTo;
         private final YearMonth yearMonth;
@@ -96,6 +104,17 @@ public class IntentClassifier {
                                 String alertTypeHint,
                                 LocalDate dateFrom, LocalDate dateTo, YearMonth yearMonth,
                                 int rankingLimit, double score) {
+            this(intent, scope, period, driverCodeHint, driverNameHint,
+                vehicleCodeHint, vehicleRegHint, alertTypeHint, null, null,
+                dateFrom, dateTo, yearMonth, rankingLimit, score);
+        }
+
+        public ClassifiedIntent(Intent intent, Scope scope, Period period,
+                                String driverCodeHint, String driverNameHint,
+                                String vehicleCodeHint, String vehicleRegHint,
+                                String alertTypeHint, String severityHint, String statusHint,
+                                LocalDate dateFrom, LocalDate dateTo, YearMonth yearMonth,
+                                int rankingLimit, double score) {
             this.intent = intent;
             this.scope = scope;
             this.period = period;
@@ -104,6 +123,8 @@ public class IntentClassifier {
             this.vehicleCodeHint = vehicleCodeHint;
             this.vehicleRegHint = vehicleRegHint;
             this.alertTypeHint = alertTypeHint;
+            this.severityHint = severityHint;
+            this.statusHint = statusHint;
             this.dateFrom = dateFrom;
             this.dateTo = dateTo;
             this.yearMonth = yearMonth;
@@ -137,6 +158,10 @@ public class IntentClassifier {
         register("alert alerts overspeed speeding violation violations incidents incident warning warnings unresolved critical", Intent.ALERT_QUERY, 4.0);
         register("braking acceleration ignition coaching", Intent.ALERT_QUERY, 3.0);
         register("trip trips kilometre kilometres km distance travelled traveled duration route", Intent.TRIP_QUERY, 3.5);
+        // Alert-Based Report keywords
+        register("alert-based alert-report", Intent.ALERT_REPORT, 8.0);
+        // Progressive Penalty keywords
+        register("penalty penalties penalized fine fines monetary warning-only", Intent.PENALTY_QUERY, 8.0);
     }
 
     private static void register(String keywords, Intent intent, double weight) {
@@ -226,13 +251,75 @@ public class IntentClassifier {
         phraseBoost(lower, scores);
 
         // ---- High-Priority Intent Overrides & Refinements -------------------
-        boolean hasReportKw = lower.contains("report") || lower.contains("pdf") || lower.contains("generate");
+        // Only trigger report keywords if "report" or "pdf" is explicitly mentioned,
+        // or user asks "generate a report" / "generate monthly report".
+        // Never treat the verb "generated" (e.g. "which driver has generated alerts") as a report keyword!
+        boolean hasReportKw = lower.matches(".*\\b(report|reports|pdf)\\b.*")
+            || lower.matches(".*\\b(generate|download|create|make)\\s+(a\\s+)?(fleet|driver|monthly|weekly|daily|alert|overall|custom)?\\s*report\\b.*");
         boolean hasDriver = driverCode != null || driverNameHint != null;
         boolean hasVehicle = vehicleCode != null || vehicleReg != null;
         boolean hasFleet = scope == Scope.FLEET;
+        boolean hasAlertType = alertType != null;
 
-        // 1. Report queries (when report/pdf/generate is present, OR explicitly asking fleet daily/weekly performance, OR driver performance with a month/period)
-        if (hasReportKw || (hasDriver && (lower.contains("perform") || lower.contains("performance")) && yearMonth != null)) {
+        // ---- 0a. Explicit Comparison Override ----
+        if (lower.contains("compare") || lower.contains("versus") || lower.contains(" vs ")) {
+            scores.put(Intent.COMPARE_DRIVERS, 55.0);
+        }
+
+        // ---- 0b. Explicit Trip Query Override ----
+        if (lower.contains("completed the most trips") || lower.contains("most trips") || lower.contains("travelled the most") || lower.contains("traveled the most")) {
+            scores.put(Intent.TRIP_QUERY, 55.0);
+        }
+
+        // ---- 0c. Driver Stats for a specific driver (e.g. "What's Rohan's safety score?") ----
+        if (hasDriver && (lower.contains("safety score") || lower.contains("safety record") || lower.contains("driver profile") || lower.contains("tell me about"))
+                && !lower.contains("trips") && yearMonth == null && !lower.contains("perform")) {
+            scores.put(Intent.DRIVER_STATS, 52.0);
+        }
+
+        // ---- Driver Ranking Override (Highest Priority for Rankings) --------
+        boolean isDriverRankingQuery = !scores.containsKey(Intent.COMPARE_DRIVERS)
+            && !scores.containsKey(Intent.TRIP_QUERY)
+            && !scores.containsKey(Intent.DRIVER_STATS)
+            && (lower.matches(".*\\b(which|who|what|rank|ranking|rankings|leaderboard|top|show|give|list)\\b.*\\b(driver|drivers)\\b.*\\b(most|highest|maximum|fewest|least|lowest|best|safest|worst|riskiest|cleanest|problem|trouble|violations?|alerts?|score|safety)\\b.*")
+                || lower.matches(".*\\b(which|who)\\s+driver\\s+(has|have|had)?\\s*(generated|caused|had|got)?\\s*(the)?\\s*(highest|most|maximum|fewest|least|lowest)\\s*(number of)?\\s*(alerts?|violations?).*")
+                || lower.matches(".*\\b(rank\\s+(the\\s+)?drivers|driver\\s+rankings?|top\\s+\\d*\\s*drivers?|safest\\s+driver|riskiest\\s+driver|worst\\s+driver|best\\s+driver)\\b.*")
+                || lower.matches(".*\\b(driver|drivers)\\s+(with|having)\\s+(the\\s+)?(most|highest|maximum|fewest|least|lowest)\\s*(number of)?\\s*(alerts?|violations?).*")
+                || lower.matches(".*\\b(who\\s+has\\s+the\\s+(most|highest|fewest|least|lowest)\\s+alerts?).*")
+                || lower.matches(".*\\b(top\\s+drivers?\\s+with\\s+the\\s+highest\\s+safety\\s+scores?).*")
+                || lower.matches(".*\\b(which\\s+driver\\s+has\\s+the\\s+lowest\\s+safety\\s+score).*")
+                || lower.matches(".*\\b(show\\s+(the\\s+)?driver\\s+with\\s+(the\\s+)?(maximum|most|highest)\\s+alerts?).*"));
+
+        if (isDriverRankingQuery) {
+            scores.put(Intent.DRIVER_RANKING, 50.0);
+        }
+
+        // ---- Driver Alert Count Override (e.g. "How many alerts did DRV009 generate?") ----
+        boolean isDriverAlertCountQuery = !isDriverRankingQuery
+            && (driverCode != null || driverNameHint != null)
+            && (lower.matches(".*\\b(how many alerts?|alert count|number of alerts?|show all alerts|total alerts?)\\b.*")
+                || lower.matches(".*\\bhow many alerts? did.*"));
+
+        if (isDriverAlertCountQuery) {
+            scores.put(Intent.DRIVER_ALERT_COUNT, 48.0);
+        }
+
+        // 0. Alert-Based Report — highest priority when alert type + report intent are both present
+        boolean isAlertReportRequest = !isDriverRankingQuery && !isDriverAlertCountQuery && (
+            (hasReportKw && hasAlertType)
+            || lower.matches(".*\\bgive me all\\b.*\\balerts?.*")
+            || (hasReportKw && (lower.contains("alert-based report")
+                || lower.contains("alert based report")
+                || lower.contains("alert report")
+                || lower.contains("harsh braking report") || lower.contains("overspeed report")
+                || lower.contains("gps disconnect report"))));
+
+        if (isAlertReportRequest) {
+            scores.put(Intent.ALERT_REPORT, 45.0);
+        }
+
+        // 1. Report queries (when report/pdf is present, OR explicitly asking fleet daily/weekly performance, OR driver performance with a month/period)
+        if (!isDriverRankingQuery && !isDriverAlertCountQuery && !isAlertReportRequest && (hasReportKw || (hasDriver && (lower.contains("perform") || lower.contains("performance")) && yearMonth != null))) {
             if (hasFleet || lower.contains("today's fleet report") || lower.contains("weekly fleet report") ||
                 lower.contains("october fleet report") || lower.contains("show today's overall") ||
                 lower.contains("overall report")) {
@@ -245,19 +332,19 @@ public class IntentClassifier {
                 // Ambiguous report scope e.g. "Show me the monthly report", "Give me today's report", "Give me this week's report", "Give me the report from September 1 to September 15"
                 scores.put(Intent.REPORT_CLARIFICATION, 35.0);
             }
-        } else if (hasFleet && (lower.contains("how did the fleet") || lower.contains("how was the fleet") || lower.contains("fleet performance") || lower.contains("what happened today"))) {
+        } else if (!isDriverRankingQuery && !isDriverAlertCountQuery && !isAlertReportRequest && hasFleet && (lower.contains("how did the fleet") || lower.contains("how was the fleet") || lower.contains("fleet performance") || lower.contains("what happened today"))) {
             scores.put(Intent.OVERALL_REPORT, 28.0);
         }
 
         // 2. Alert / Training / Coaching queries
-        if (lower.contains("needs training") || lower.contains("need training") || lower.contains("coaching") ||
+        if (!isAlertReportRequest && (lower.contains("needs training") || lower.contains("need training") || lower.contains("coaching") ||
             lower.contains("most violations") || lower.contains("repeated violations") ||
             lower.contains("repeated harsh braking") || lower.contains("which day had the most alerts") ||
             lower.contains("what alerts happened today") || lower.contains("show today's alerts") ||
             lower.contains("how many overspeed alerts") || lower.contains("how many alerts were generated today") ||
             lower.contains("show open alerts") || lower.contains("critical alerts") || lower.contains("unresolved") ||
             lower.contains("most common alert") || lower.contains("how many warnings") ||
-            lower.contains("night driving alerts")) {
+            lower.contains("night driving alerts"))) {
             scores.put(Intent.ALERT_QUERY, 32.0);
         }
 
@@ -321,19 +408,34 @@ public class IntentClassifier {
         // 9. Vehicle specific queries vs alert queries
         if (lower.contains("which vehicle has the most alerts") || lower.contains("vehicle causes the most trouble") ||
             lower.contains("vehicles had gps") || lower.contains("most overspeed incidents") ||
+            lower.matches(".*\\b(which|what|top|rank)\\s+vehicles?\\b.*\\b(most alerts?|highest alerts?|most trouble|problems?).*") ||
             (hasVehicle && (lower.contains("trouble") || (lower.contains("alert") && !lower.contains("driver"))))) {
-            scores.put(Intent.VEHICLE_ALERT_ANALYSIS, 26.0);
+            scores.put(Intent.VEHICLE_ALERT_ANALYSIS, 28.0);
+            scores.put(Intent.VEHICLE_RANKING, 28.0);
         } else if (hasVehicle && !lower.contains("trip") && (lower.contains("assigned") || lower.contains("who drives") || lower.contains("show vehicle") || lower.contains("inactive") || lower.contains("highest speed") || lower.contains("speedometer") || lower.contains("details") || lower.contains("performance") || lower.contains("statistics") || lower.contains("active"))) {
             scores.put(Intent.VEHICLE_STATS, 26.0);
         }
 
         // 10. Driver profile / stats (e.g. "tell me about Rohan", "show Rohan's performance", "what's Rohan's safety score")
-        if (hasDriver && !scores.containsKey(Intent.DRIVER_REPORT) && !scores.containsKey(Intent.DRIVER_RECOMMENDATION) && !scores.containsKey(Intent.COMPARE_DRIVERS) && !scores.containsKey(Intent.TRIP_QUERY) && !scores.containsKey(Intent.ALERT_QUERY)) {
+        if (hasDriver && !scores.containsKey(Intent.DRIVER_REPORT) && !scores.containsKey(Intent.DRIVER_RANKING) && !scores.containsKey(Intent.DRIVER_ALERT_COUNT) && !scores.containsKey(Intent.DRIVER_RECOMMENDATION) && !scores.containsKey(Intent.COMPARE_DRIVERS) && !scores.containsKey(Intent.TRIP_QUERY) && !scores.containsKey(Intent.ALERT_QUERY)) {
             if (lower.contains("tell me about") || lower.contains("how did") || lower.contains("how was") ||
                 lower.contains("score") || lower.contains("performance") || lower.contains("profile") ||
                 lower.contains("stats") || lower.contains("drive") || lower.contains("drives")) {
                 scores.put(Intent.DRIVER_STATS, 25.0);
             }
+        }
+
+        // 11. Maintenance and Cost queries
+        if (lower.contains("maintenance") || lower.contains("service record") || lower.contains("servicing") || lower.contains("oil change") || lower.contains("repair")) {
+            scores.put(Intent.MAINTENANCE_QUERY, 30.0);
+        }
+        if (lower.contains("cost") || lower.contains("expense") || lower.contains("fuel cost") || lower.contains("toll cost") || lower.contains("spending")) {
+            scores.put(Intent.COST_QUERY, 30.0);
+        }
+
+        // 12. Progressive Warning and Penalty queries (High priority override)
+        if (lower.contains("penalt") || lower.contains("warning-only") || lower.contains("fine") || lower.contains("monetary") || lower.contains("fines")) {
+            scores.put(Intent.PENALTY_QUERY, 55.0);
         }
 
         // ---- Pick winner ---------------------------------------------------
@@ -346,12 +448,17 @@ public class IntentClassifier {
             }
         }
 
-        log.debug("IntentClassifier: '{}' → {} (score={}) scope={}, driver={}/{}, vehicle={}/{}, period={}, alertType={}",
-            rawMessage, best, String.format("%.1f", bestScore), scope,
-            driverCode, driverNameHint, vehicleCode, vehicleReg, period, alertType);
+        // Extract severity and status hints
+        String severityHint = extractSeverityHint(lower);
+        String statusHint   = extractStatusHint(lower);
 
-        return makeResult(best, scope, period, driverCode, driverNameHint,
-            vehicleCode, vehicleReg, alertType, dateFrom, dateTo, yearMonth, limit, bestScore);
+        log.debug("IntentClassifier: '{}' → {} (score={}) scope={}, driver={}/{}, vehicle={}/{}, period={}, alertType={}, severity={}, status={}",
+            rawMessage, best, String.format("%.1f", bestScore), scope,
+            driverCode, driverNameHint, vehicleCode, vehicleReg, period, alertType, severityHint, statusHint);
+
+        return new ClassifiedIntent(best, scope, period, driverCode, driverNameHint,
+            vehicleCode, vehicleReg, alertType, severityHint, statusHint,
+            dateFrom, dateTo, yearMonth, limit, bestScore);
     }
 
     // =====================================================================
@@ -368,8 +475,12 @@ public class IntentClassifier {
             lower.contains("who has the lowest safety") || lower.contains("which drivers are risky") ||
             lower.contains("who needs improvement") || lower.contains("fewest alerts") ||
             lower.contains("cleanest record") || lower.contains("who has the most violations") ||
-            lower.contains("most overspeed alerts") || lower.contains("most harsh braking incidents")) {
-            scores.merge(Intent.DRIVER_RANKING, 12.0, Double::sum);
+            lower.contains("most overspeed alerts") || lower.contains("most harsh braking incidents") ||
+            lower.contains("highest number of alerts") || lower.contains("most alerts") ||
+            lower.contains("maximum alerts") || lower.contains("alert count")) {
+            if (lower.contains("driver") || lower.contains("drivers") || lower.contains("who") || !lower.contains("vehicle")) {
+                scores.merge(Intent.DRIVER_RANKING, 16.0, Double::sum);
+            }
         }
 
         // Recommendation
@@ -446,10 +557,11 @@ public class IntentClassifier {
             scores.merge(Intent.TRIP_QUERY, 12.0, Double::sum);
         }
 
-        // Vehicles with alert issues
-        if (lower.contains("which vehicle has the most alerts") || lower.contains("highest number of alerts") ||
-            lower.contains("causes the most trouble") || lower.contains("gps disconnect") ||
-            lower.contains("vehicle trouble") || lower.contains("vehicles had gps")) {
+        // Vehicles with alert issues (restricted so questions about drivers never trigger vehicle analysis)
+        if ((lower.contains("vehicle") || lower.contains("truck") || lower.contains("vh")) &&
+            (lower.contains("which vehicle has the most alerts") || lower.contains("causes the most trouble") ||
+             lower.contains("gps disconnect") || lower.contains("vehicle trouble") ||
+             lower.contains("vehicles had gps") || lower.contains("most alerts"))) {
             scores.merge(Intent.VEHICLE_ALERT_ANALYSIS, 14.0, Double::sum);
         }
 
@@ -498,8 +610,23 @@ public class IntentClassifier {
         if (lower.contains("night driv") || lower.contains("night time")) return "Night Driving Alert";
         if (lower.contains("ignition")) return "Ignition Alert";
         if (lower.contains("fatigue") || lower.contains("drowsy")) return "Fatigue Alert";
+        if (lower.contains("geofence")) return "Geofence Alert";
+        return null;
+    }
+
+    /** Extract severity hint: CRITICAL, WARNING, INFO */
+    public String extractSeverityHint(String lower) {
         if (lower.contains("critical")) return "CRITICAL";
-        if (lower.contains("warning")) return "WARNING";
+        if (lower.contains("warning") || lower.contains("warnings")) return "WARNING";
+        if (lower.contains(" info ") || lower.contains("informational")) return "INFO";
+        return null;
+    }
+
+    /** Extract alert status hint: OPEN, RESOLVED, HISTORICAL */
+    public String extractStatusHint(String lower) {
+        if (lower.contains("open") || lower.contains("unresolved") || lower.contains("active alerts")) return "OPEN";
+        if (lower.contains("resolved") || lower.contains("closed")) return "RESOLVED";
+        if (lower.contains("historical") || lower.contains("archived")) return "HISTORICAL";
         return null;
     }
 
@@ -684,7 +811,11 @@ public class IntentClassifier {
             "distance", "kilometres", "kilometre", "overspeed", "braking", "speeding",
             "unresolved", "critical", "warning", "warnings", "violation", "violations", "incident", "incidents",
             "between", "inactive", "active", "entered", "exited", "entry", "exit", "speed", "fastest",
-            "highest", "lowest", "fewest", "least", "trouble", "problems", "problem", "assigned", "drives", "drive"
+            "highest", "lowest", "fewest", "least", "trouble", "problems", "problem", "assigned", "drives", "drive",
+            "number", "numbers", "count", "counts", "amount", "total", "totals", "rate", "frequency",
+            "generated", "generating", "occurring", "occurred", "happened", "made", "given", "maximum",
+            "minimum", "cost", "costs", "maintenance", "servicing", "service",
+            "list", "penalty", "penalties", "penalized", "fine", "fines", "monetary"
         );
         for (String token : lower.replaceAll("[^a-z\\s]", " ").split("\\s+")) {
             if (token.length() >= 4 && !stopWords.contains(token) && !MONTH_NAMES.containsKey(token) && KEYWORD_SCORES.get(token) == null) {
@@ -723,13 +854,14 @@ public class IntentClassifier {
     }
 
     /**
-     * Normalizes common conversational spelling mistakes, typos, slang, and phonetic variations.
+     * Normalizes common conversational spelling mistakes, typos, slang, voice-recognition
+     * mishears, Indian-English contractions, and domain-specific synonyms.
      */
      public String normalizeSpellingAndTypos(String text) {
         if (text == null) return "";
         String s = " " + text.toLowerCase().trim() + " ";
 
-        // Common typos in fleet terms
+        // ── Fleet term typos ──────────────────────────────────────────────
         s = s.replaceAll("\\b(vechile|vechiles|vehical|vehicals|vehicls|vehecle|vhicle|vheicle)\\b", "vehicle");
         s = s.replaceAll("\\b(drvers|dirvers|drivres)\\b", "drivers");
         s = s.replaceAll("\\b(drver|drivr|dirver|dreiver)\\b", "driver");
@@ -742,14 +874,57 @@ public class IntentClassifier {
         s = s.replaceAll("\\b(repord|reprt|reprot|repot|rport)\\b", "report");
         s = s.replaceAll("\\b(saftest|safestt|safste|safeest)\\b", "safest");
         s = s.replaceAll("\\b(riskist|riskey|riskiestt|riski|riskeist)\\b", "riskiest");
-        s = s.replaceAll("\\b(overspeeding|overspeeded|ovrspeed|overspeedd)\\b", "overspeed");
-        s = s.replaceAll("\\b(brakng|breakin|breakng|brakeing|brakign)\\b", "braking");
+        s = s.replaceAll("\\b(overspeeding|overspeeded|ovrspeed|overspeedd|ovr speed|over speed)\\b", "overspeed");
+        s = s.replaceAll("\\b(brakng|breakin|breakng|brakeing|brakign|braiking|braikng)\\b", "braking");
         s = s.replaceAll("\\b(performng|perfromance|performence|preformance)\\b", "performance");
         s = s.replaceAll("\\b(yestarday|yesterdy|yestrday)\\b", "yesterday");
         s = s.replaceAll("\\b(tday|todday|2day)\\b", "today");
         s = s.replaceAll("\\b(compr|comapre|compair|compar)\\b", "compare");
+        s = s.replaceAll("\\b(genarate|genrate|gnerate|generaet)\\b", "generate");
+        s = s.replaceAll("\\b(downlod|downlaod|donwload)\\b", "download");
+        s = s.replaceAll("\\b(montly|monthely|monthy)\\b", "monthly");
+        s = s.replaceAll("\\b(weekely|wekly|weekl)\\b", "weekly");
+        s = s.replaceAll("\\b(daly|dayly|dailey)\\b", "daily");
+        s = s.replaceAll("\\b(fllet|fleat|flet)\\b", "fleet");
+        s = s.replaceAll("\\b(distanse|distanc|distnce)\\b", "distance");
+        s = s.replaceAll("\\b(kilometre|killometre|killometer|kms)\\b", "kilometres");
+        s = s.replaceAll("\\b(rankngs|rankigns|rankng)\\b", "rankings");
+        s = s.replaceAll("\\b(leeder board|leder board|leaderborad|leader board)\\b", "leaderboard");
+        s = s.replaceAll("\\b(penality|penaly|penalti|penlaty)\\b", "penalty");
 
-        // Common conversational contractions / slang
+        // ── Voice-recognition mishears (speech-to-text phonetic errors) ───
+        s = s.replaceAll("harsh breaking|harsh breking|hard breaking", "harsh braking");
+        s = s.replaceAll("harsh acceleration alert|harsh akselleration|harsh accleration", "harsh acceleration alert");
+        s = s.replaceAll("gps disconnet|gps disconect|gps dsconnect|gps disconnected alert", "gps disconnect");
+        s = s.replaceAll("nite driving|night time driving|night driv\\b", "night driving");
+        s = s.replaceAll("\\b(ignission|igntion|igniton)\\b", "ignition");
+        s = s.replaceAll("\\b(fatige|fatgue|fatigued)\\b", "fatigue");
+        s = s.replaceAll("geofense|geo fence|geo fencing|geo-fence", "geofence");
+        s = s.replaceAll("\\b(critcal|critial|crtical|criticl|criticial)\\b", "critical");
+        s = s.replaceAll("\\b(warnng|warining|warrning|warining)\\b", "warning");
+        s = s.replaceAll("unresovled|unresloved|un resolved|un-resolved", "unresolved");
+        s = s.replaceAll("\\b(historcal|historicl|histrical)\\b", "historical");
+        s = s.replaceAll("safty score|saftey score|safety scor\\b", "safety score");
+        s = s.replaceAll("\\b(safty|saftey)\\b", "safety");
+
+        // ── DRV / VH code variants spoken aloud ────────────────────────────
+        s = s.replaceAll("\\bdriver\\s+(\\d{1,3})\\b", "drv$1");
+        s = s.replaceAll("\\bvehicle\\s+(\\d{1,3})\\b", "vh$1");
+
+        // ── Period synonyms ─────────────────────────────────────────────────
+        s = s.replaceAll("last 7 days|past 7 days|past week|previous week", "last week");
+        s = s.replaceAll("last 30 days|past 30 days|past month|previous month", "last month");
+        s = s.replaceAll("current week|ongoing week|this current week", "this week");
+        s = s.replaceAll("current month|ongoing month|this current month", "this month");
+        s = s.replaceAll("\\b(right now|at the moment|at present|as of now)\\b", "today");
+
+        // ── Scope / intent synonyms ─────────────────────────────────────────
+        s = s.replaceAll("\\b(fetch|get me|pull up|pull|retrieve|bring me)\\b", "give me");
+        s = s.replaceAll("\\b(display|list|view|open|see|look at)\\b", "show");
+        s = s.replaceAll("\\b(risky|dangerous|problematic)\\s+(driver|drivers)\\b", "riskiest driver");
+        s = s.replaceAll("\\b(best|top|excellent|number one)\\s+(driver|drivers)\\b", "safest driver");
+
+        // ── Common conversational contractions / slang ──────────────────────
         s = s.replaceAll("\\b(pls|plz)\\b", "please");
         s = s.replaceAll("\\b(thx|tq|thnx|thanx)\\b", "thanks");
         s = s.replaceAll("\\b(u)\\b", "you");
@@ -759,7 +934,11 @@ public class IntentClassifier {
         s = s.replaceAll("\\b(abt)\\b", "about");
         s = s.replaceAll("\\b(tellme)\\b", "tell me");
         s = s.replaceAll("\\b(showme)\\b", "show me");
-        s = s.replaceAll("\\b(gimme)\\b", "give me");
+        s = s.replaceAll("\\b(gimme|gimmie)\\b", "give me");
+        s = s.replaceAll("\\b(wanna|wana)\\b", "want");
+        s = s.replaceAll("\\b(gonna|gona)\\b", "going to");
+        s = s.replaceAll("\\b(lemme)\\b", "let me");
+        s = s.replaceAll("\\b(kinda|sorta)\\b", "kind of");
 
         return s.trim();
     }
@@ -770,6 +949,6 @@ public class IntentClassifier {
             LocalDate from, LocalDate to, YearMonth ym,
             int limit, double score) {
         return new ClassifiedIntent(intent, scope, period, driverCode, driverName,
-            vehicleCode, vehicleReg, alertType, from, to, ym, limit, score);
+            vehicleCode, vehicleReg, alertType, null, null, from, to, ym, limit, score);
     }
 }

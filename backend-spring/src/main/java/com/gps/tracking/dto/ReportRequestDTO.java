@@ -18,4 +18,10 @@ public class ReportRequestDTO {
     private Integer month2; // integer month (1–12)
     private String date;    // e.g. "2026-10-12" for DAILY reports
     private Long tripId;
+
+    // Filter fields for Alert-Based Reports:
+    private java.util.List<String> alertTypes; // e.g. ["Overspeed Alert", "Harsh Braking Alert"]
+    private String severity;                   // ALL, CRITICAL, WARNING, INFO
+    private String status;                     // ALL, OPEN, RESOLVED, HISTORICAL
+    private String datePreset;                 // TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK, THIS_MONTH, LAST_MONTH, CUSTOM
 }

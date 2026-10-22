@@ -27,7 +27,7 @@ DRIVER_NAMES = [
     "Vijay Reddy", "Lakshmi Rao", "Manoj Tiwari", "Geeta Gupta", "Sanjay Mishra",
     "Rekha Saxena", "Ravi Chauhan"
 ]
-VEHICLE_TYPES = ["Truck", "Van", "Car", "Mini Truck", "Pickup", "Bus"]
+VEHICLE_TYPES = ["Truck", "Van", "Mini Truck", "Pickup", "Bus"]
 MAKE_MODELS = ["Tata Ace", "Mahindra Bolero", "Ashok Leyland", "Maruti Eeco", "Toyota Innova",
                "Tata Prima", "Eicher Pro", "Force Traveller", "Bajaj Maxima", "Piaggio Ape"]
 FUEL_TYPES = ["Diesel", "Petrol", "CNG"]

@@ -33,10 +33,23 @@ public class AlertController {
         return ResponseEntity.ok(ApiResponse.ok(alerts));
     }
 
+    @GetMapping("/summary")
+    @Operation(summary = "Get overall alert count statistics")
+    public ResponseEntity<ApiResponse<AlertSummaryDTO>> getSummary() {
+        return ResponseEntity.ok(ApiResponse.ok(alertService.getAlertSummary()));
+    }
+
     @GetMapping("/{id}")
     @Operation(summary = "Get alert by ID")
     public ResponseEntity<ApiResponse<AlertDTO>> getById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(alertService.getById(id)));
+    }
+
+    @PostMapping
+    @Operation(summary = "Create a new alert and trigger notifications")
+    public ResponseEntity<ApiResponse<AlertDTO>> createAlert(@RequestBody AlertDTO alertDTO) {
+        AlertDTO created = alertService.createFromDTO(alertDTO);
+        return ResponseEntity.ok(ApiResponse.ok(created, "Alert created and notifications processed"));
     }
 
     @PutMapping("/{id}/resolve")

@@ -189,6 +189,7 @@ public class DriverService {
                 .code(dto.getCode())
                 .name(dto.getName())
                 .phone(dto.getPhone())
+                .email(dto.getEmail())
                 .licenseNumber(dto.getLicenseNumber())
                 .joinedOn(dto.getJoinedOn())
                 .active(dto.getActive() != null ? dto.getActive() : true)
@@ -202,6 +203,7 @@ public class DriverService {
                 .orElseThrow(() -> new ResourceNotFoundException("Driver", id));
         if (dto.getName() != null) driver.setName(dto.getName());
         if (dto.getPhone() != null) driver.setPhone(dto.getPhone());
+        if (dto.getEmail() != null) driver.setEmail(dto.getEmail());
         if (dto.getLicenseNumber() != null) driver.setLicenseNumber(dto.getLicenseNumber());
         if (dto.getJoinedOn() != null) driver.setJoinedOn(dto.getJoinedOn());
         if (dto.getActive() != null) driver.setActive(dto.getActive());
@@ -214,6 +216,7 @@ public class DriverService {
         dto.setCode(driver.getCode());
         dto.setName(driver.getName());
         dto.setPhone(driver.getPhone());
+        dto.setEmail(driver.getEmail());
         dto.setLicenseNumber(driver.getLicenseNumber());
         dto.setJoinedOn(driver.getJoinedOn());
         dto.setActive(driver.getActive());

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Badge, Button } from 'react-bootstrap';
+import { Badge, Button, Modal, Form } from 'react-bootstrap';
 import {
   Bell, Mail, Smartphone, AlertCircle, AlertTriangle,
-  CheckCircle, Clock, Filter, RefreshCw, Search
+  CheckCircle, Clock, Filter, RefreshCw, Search, Send
 } from 'lucide-react';
-import { getAlerts, resolveAlert } from '../api/alerts';
+import { getAlerts, resolveAlert, createAlert } from '../api/alerts';
+import { getVehicles } from '../api/vehicles';
+import { getDrivers } from '../api/drivers';
 
 // Spring Boot AlertDTO field accessors
 const getAlertType = (a) => a.alertType || a.alert_type || '—';
@@ -66,6 +68,65 @@ export default function Alerts() {
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState(null);
+
+  // Demo Trigger Modal state
+  const [showDemoModal, setShowDemoModal] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [demoNotification, setDemoNotification] = useState(null);
+  const [vehiclesList, setVehiclesList] = useState([]);
+  const [driversList, setDriversList] = useState([]);
+  const [demoForm, setDemoForm] = useState({
+    alertType: 'Over-Speeding Alert',
+    severity: 'CRITICAL',
+    vehicleId: '1',
+    driverId: '20',
+    speedKmph: 85.5,
+    speedLimitKmph: 60.0,
+    roadName: 'Western Express Highway, Mumbai',
+    message: 'Live demonstration alert: Vehicle exceeded speed limit by 25.5 km/h'
+  });
+
+  useEffect(() => {
+    getVehicles().then(data => {
+      const v = Array.isArray(data) ? data : (data?.content || []);
+      setVehiclesList(v);
+    }).catch(() => {});
+    getDrivers().then(data => {
+      const d = Array.isArray(data) ? data : (data?.content || []);
+      setDriversList(d);
+    }).catch(() => {});
+  }, []);
+
+  const handleTriggerDemo = async (e) => {
+    e.preventDefault();
+    setDemoLoading(true);
+    setDemoNotification(null);
+    try {
+      const res = await createAlert({
+        reference: 'DEMO_ALERT_' + Date.now(),
+        alertType: demoForm.alertType,
+        severity: demoForm.severity,
+        vehicleId: Number(demoForm.vehicleId),
+        driverId: Number(demoForm.driverId),
+        speedKmph: Number(demoForm.speedKmph),
+        speedLimitKmph: Number(demoForm.speedLimitKmph),
+        roadName: demoForm.roadName,
+        message: demoForm.message
+      });
+
+      setShowDemoModal(false);
+      setDemoNotification('Live alert created! Real emails are being delivered to Fleet (riyamokale@gmail.com), Manager (rhea260906@gmail.com), and Driver (merinjoys28@gmail.com).');
+      loadAlerts(0);
+      
+      // Re-fetch after 5 seconds to show updated "Sent" status badges
+      setTimeout(() => loadAlerts(0), 5000);
+      setTimeout(() => setDemoNotification(null), 15000);
+    } catch (err) {
+      alert('Failed to trigger alert: ' + (err?.response?.data?.message || err.message));
+    } finally {
+      setDemoLoading(false);
+    }
+  };
 
   const loadAlerts = (p = 0) => {
     setLoading(true);
@@ -132,14 +193,29 @@ export default function Alerts() {
             Fleet Alerts
           </h1>
           <p className="text-muted mb-0">
-            {alerts.length} alerts loaded · Email & SMS delivery status per recipient
+            {alerts.length} alerts loaded · Live multi-recipient email delivery tracking
           </p>
         </div>
-        <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
-          onClick={() => loadAlerts(page)}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div className="d-flex align-items-center gap-2">
+          <Button variant="danger" size="sm" className="d-flex align-items-center gap-1 shadow-sm px-3"
+            onClick={() => setShowDemoModal(true)}>
+            <Send size={14} /> Trigger Live Alert
+          </Button>
+          <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+            onClick={() => loadAlerts(page)}>
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
+
+      {demoNotification && (
+        <div className="alert alert-success alert-dismissible fade show d-flex align-items-center gap-2 mb-3 shadow-sm border-0"
+          style={{ background: '#dcfce7', color: '#166534', borderLeft: '4px solid #16a34a' }}>
+          <CheckCircle size={18} className="text-success flex-shrink-0" />
+          <div className="fw-medium">{demoNotification}</div>
+          <button type="button" className="btn-close" onClick={() => setDemoNotification(null)}></button>
+        </div>
+      )}
 
       {error && <div className="alert alert-warning mb-3">{error}</div>}
 
@@ -268,6 +344,21 @@ export default function Alerts() {
                           <div className="col-12 text-muted" style={{ fontSize: 11 }}>
                             {formatDateTime(getOccurredAt(alert))}
                           </div>
+                          {alert.occurrenceNumber != null && (
+                            <div className="col-12 mt-1 pt-1 border-top">
+                              <span className={`badge ${alert.penaltyClassification === 'PENALTY' ? 'bg-danger text-white' : 'bg-warning text-dark'}`} style={{ fontSize: 11 }}>
+                                {alert.penaltyClassification === 'PENALTY' ? '🚨 Fine Applied' : '⚠️ Warning'} · Occurrence #{alert.occurrenceNumber}
+                              </span>
+                              <span className="ms-2 fw-bold" style={{ color: alert.penaltyClassification === 'PENALTY' ? '#dc2626' : '#64748b', fontSize: 12 }}>
+                                Alert Penalty: ₹{alert.penaltyAmount != null ? Number(alert.penaltyAmount).toFixed(2) : '0.00'}
+                              </span>
+                              {alert.driverCumulativePenalties != null && (
+                                <span className="ms-2 text-muted" style={{ fontSize: 11 }}>
+                                  (Driver Cumulative: ₹{Number(alert.driverCumulativePenalties).toFixed(2)})
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -372,6 +463,166 @@ export default function Alerts() {
           )}
         </>
       )}
+
+      {/* Trigger Live Demo Alert Modal */}
+      <Modal show={showDemoModal} onHide={() => !demoLoading && setShowDemoModal(false)} centered size="lg">
+        <Modal.Header closeButton={!demoLoading} className="bg-light">
+          <Modal.Title className="h5 fw-bold d-flex align-items-center gap-2 mb-0">
+            <Send size={18} className="text-danger" />
+            Trigger Live Fleet Alert (Demo)
+          </Modal.Title>
+        </Modal.Header>
+        <Form onSubmit={handleTriggerDemo}>
+          <Modal.Body className="p-4">
+            <p className="text-muted small mb-3">
+              Simulate an instant telemetry event. When submitted, the Spring Boot backend creates the alert record and dispatches real-time HTML emails to Fleet Admin, Manager, and the selected Driver.
+            </p>
+
+            <div className="row g-3">
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Alert Type</Form.Label>
+                  <Form.Select
+                    value={demoForm.alertType}
+                    onChange={e => setDemoForm({ ...demoForm, alertType: e.target.value })}>
+                    <option value="Over-Speeding Alert">Over-Speeding Alert</option>
+                    <option value="Harsh Braking Alert">Harsh Braking Alert</option>
+                    <option value="Harsh Acceleration Alert">Harsh Acceleration Alert</option>
+                    <option value="Geofence Breach Alert">Geofence Breach Alert</option>
+                    <option value="SOS Panic Alert">SOS Panic Alert</option>
+                  </Form.Select>
+                </Form.Group>
+              </div>
+
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Severity</Form.Label>
+                  <Form.Select
+                    value={demoForm.severity}
+                    onChange={e => setDemoForm({ ...demoForm, severity: e.target.value })}>
+                    <option value="CRITICAL">CRITICAL</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="INFO">INFO</option>
+                  </Form.Select>
+                </Form.Group>
+              </div>
+
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Vehicle</Form.Label>
+                  <Form.Select
+                    value={demoForm.vehicleId}
+                    onChange={e => setDemoForm({ ...demoForm, vehicleId: e.target.value })}>
+                    {vehiclesList.length > 0 ? (
+                      vehiclesList.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.registrationNumber || v.code} ({v.model || 'Fleet Vehicle'})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="1">MH03AC4582 (VH001 - Heavy Duty Truck)</option>
+                    )}
+                  </Form.Select>
+                </Form.Group>
+              </div>
+
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Driver (Dynamic Email)</Form.Label>
+                  <Form.Select
+                    value={demoForm.driverId}
+                    onChange={e => setDemoForm({ ...demoForm, driverId: e.target.value })}>
+                    {driversList.length > 0 ? (
+                      driversList.map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} {d.email ? `(${d.email})` : '(No Email)'}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="20">Merin Joys (merinjoys28@gmail.com)</option>
+                    )}
+                  </Form.Select>
+                </Form.Group>
+              </div>
+
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Speed / Limit (km/h)</Form.Label>
+                  <div className="input-group">
+                    <Form.Control
+                      type="number"
+                      step="0.5"
+                      placeholder="Speed"
+                      value={demoForm.speedKmph}
+                      onChange={e => setDemoForm({ ...demoForm, speedKmph: e.target.value })}
+                    />
+                    <span className="input-group-text bg-light text-muted">/</span>
+                    <Form.Control
+                      type="number"
+                      step="0.5"
+                      placeholder="Limit"
+                      value={demoForm.speedLimitKmph}
+                      onChange={e => setDemoForm({ ...demoForm, speedLimitKmph: e.target.value })}
+                    />
+                  </div>
+                </Form.Group>
+              </div>
+
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Road / Location</Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={demoForm.roadName}
+                    onChange={e => setDemoForm({ ...demoForm, roadName: e.target.value })}
+                  />
+                </Form.Group>
+              </div>
+
+              <div className="col-12">
+                <Form.Group>
+                  <Form.Label className="small fw-semibold text-secondary">Alert Message</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={2}
+                    value={demoForm.message}
+                    onChange={e => setDemoForm({ ...demoForm, message: e.target.value })}
+                  />
+                </Form.Group>
+              </div>
+            </div>
+
+            {/* Recipient preview box */}
+            <div className="p-3 mt-3 rounded border" style={{ background: '#f8fafc', fontSize: 13 }}>
+              <div className="fw-bold mb-1 text-dark d-flex align-items-center gap-1">
+                <Mail size={14} className="text-primary" /> Live Recipients to be Notified:
+              </div>
+              <ul className="list-unstyled mb-0 ms-2 small text-muted">
+                <li>• <strong>Fleet Admin:</strong> <code>riyamokale@gmail.com</code></li>
+                <li>• <strong>Manager:</strong> <code>rhea260906@gmail.com</code></li>
+                <li>• <strong>Driver:</strong> Dynamic lookup from driver record (e.g. <code>merinjoys28@gmail.com</code>)</li>
+              </ul>
+            </div>
+          </Modal.Body>
+          <Modal.Footer className="bg-light">
+            <Button variant="outline-secondary" size="sm" onClick={() => setShowDemoModal(false)} disabled={demoLoading}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" type="submit" disabled={demoLoading} className="d-flex align-items-center gap-2">
+              {demoLoading ? (
+                <>
+                  <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true" />
+                  Dispatching Emails...
+                </>
+              ) : (
+                <>
+                  <Send size={14} /> Send Alert & Deliver Emails
+                </>
+              )}
+            </Button>
+          </Modal.Footer>
+        </Form>
+      </Modal>
     </div>
   );
 }

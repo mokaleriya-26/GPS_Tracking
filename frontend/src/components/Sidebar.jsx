@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Car, Bell, FileText, Users, Route,
-  Settings, ChevronLeft, ChevronRight, Gauge
+  Settings, ChevronLeft, ChevronRight, Gauge, Radio, Scale
 } from 'lucide-react';
 
 const NAV_GROUPS = [
@@ -10,6 +10,12 @@ const NAV_GROUPS = [
     label: 'Overview',
     items: [
       { to: '/',        icon: <LayoutDashboard size={18} />, label: 'Dashboard' },
+    ]
+  },
+  {
+    label: 'Simulation',
+    items: [
+      { to: '/simulation', icon: <Radio size={18} />, label: 'Live Simulation' },
     ]
   },
   {
@@ -23,7 +29,8 @@ const NAV_GROUPS = [
   {
     label: 'Monitoring',
     items: [
-      { to: '/alerts',  icon: <Bell size={18} />,   label: 'Alerts' },
+      { to: '/alerts',     icon: <Bell size={18} />,   label: 'Alerts' },
+      { to: '/penalties',  icon: <Scale size={18} />,  label: 'Penalty Management' },
     ]
   },
   {

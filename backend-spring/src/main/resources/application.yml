@@ -108,8 +108,8 @@ springdoc:
 # ============================================================
 notification:
   email:
-    fleet: ${FLEET_EMAIL:fleet@trackfleet.com}
-    manager: ${MANAGER_EMAIL:manager@trackfleet.com}
+    fleet: ${FLEET_EMAIL:riyamokale@gmail.com}
+    manager: ${MANAGER_EMAIL:rhea260906@gmail.com}
     from: ${EMAIL_FROM:no-reply@trackfleet.com}
   sms:
     msg91:
@@ -130,11 +130,11 @@ ai:
     enabled: true
   llm:
     enabled: ${LLM_ENABLED:false}
-    provider: ${LLM_PROVIDER:openai} # openai, anthropic, or gemini
+    provider: ${LLM_PROVIDER:gemini} # gemini, openai, or groq
     api-key: ${LLM_API_KEY:}
-    api-url: ${LLM_API_URL:https://api.openai.com/v1/chat/completions}
-    model: ${LLM_MODEL:gpt-4o-mini}
-    temperature: ${LLM_TEMPERATURE:0.2}
+    api-url: ${LLM_API_URL:https://generativelanguage.googleapis.com/v1beta/openai/chat/completions}
+    model: ${LLM_MODEL:gemini-1.5-flash}
+    temperature: ${LLM_TEMPERATURE:0.1}
     timeout: ${LLM_TIMEOUT_SECONDS:15}
 
 # ============================================================

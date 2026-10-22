@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: gps-tracking-backend-test
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:gps_tracking}
+    username: ${DB_USERNAME:riyamokale}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+  flyway:
+    enabled: false
+
+  mail:
+    host: localhost
+    port: 2525
+    username: test
+    password: test
+
+notification:
+  email:
+    fleet: ${FLEET_EMAIL:riyamokale@gmail.com}
+    manager: ${MANAGER_EMAIL:rhea260906@gmail.com}
+    from: ${EMAIL_FROM:no-reply@trackfleet.com}
+  sms:
+    fleet-phone: ${FLEET_PHONE:9326577285}
+    manager-phone: ${MANAGER_PHONE:9324399026}

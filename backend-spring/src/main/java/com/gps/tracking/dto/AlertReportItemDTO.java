@@ -21,4 +21,8 @@ public class AlertReportItemDTO {
     private Long count;
     private String driverName;
     private String status;
+    private Integer occurrenceNumber;
+    private String classification;
+    private java.math.BigDecimal penaltyAmount;
+    private java.math.BigDecimal cumulativePenalties;
 }

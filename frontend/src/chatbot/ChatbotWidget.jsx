@@ -1,45 +1,37 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { MessageCircle, X, Send, Bot, User, FileText, Download, ExternalLink, RefreshCw, Zap, Mic, MicOff, AlertCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  MessageCircle, X, Send, Bot, User, FileText, Download,
+  ExternalLink, RefreshCw, Zap, Mic, MicOff, AlertCircle, ChevronRight,
+  Volume2, VolumeX, Square, RotateCcw
+} from 'lucide-react';
 import { sendChatMessage, clearSession } from '../api/chat';
 import { useSpeechRecognition } from './useSpeechRecognition';
+import { useSpeechSynthesis } from './useSpeechSynthesis';
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Suggestion chips shown in the welcome message
+// ─────────────────────────────────────────────────────────────────────────────
+const WELCOME_CHIPS = [
+  '🌟 Recommend Drivers',
+  '📊 Fleet Summary',
+  '🏆 Safest Driver',
+  '⚠️ Show Open Alerts',
+  '📄 Generate Alert Report',
+  '🚗 VH001 Details',
+];
+
 const WELCOME = {
   role: 'bot',
-  text: `👋 **Hi! I'm your Fleet Assistant.**\n\nI have live access to your fleet database — vehicles, drivers, trips, alerts and PDF reports.\n\nTry asking:\n• *"Give me recommendation of drivers"*\n• *"Which vehicle has the most alerts?"*\n• *"Who is the safest driver?"*\n• *"Who should I choose for a long trip?"*\n• *"Tell me about VH003"*\n• *"Generate fleet report for September 2026"*`,
+  text: `👋 **Hi! I'm your Fleet Assistant.**\n\nI have live access to your fleet database — vehicles, drivers, trips, alerts and PDF reports.\n\nTry asking:\n• *"Give me all harsh braking alerts for September"*\n• *"Generate overspeed alert report this week"*\n• *"Who is the safest driver?"*\n• *"Who should I choose for a long trip?"*\n• *"Generate fleet report for October 2026"*\n• *"Show critical alerts from last month"*`,
   ts: new Date(),
-  quickActions: ['🌟 Recommend Drivers', '📊 Fleet Summary', '🏆 Safest Driver', '🚗 VH001 Details']
+  quickActions: WELCOME_CHIPS,
 };
 
-/** Render plain text line with bold/italic/table-row support */
-function RenderLine({ line, isFirstRow }) {
-  if (line.startsWith('|') && line.endsWith('|')) {
-    if (/^\|[-:\s|]+\|$/.test(line)) return null;
-    const cells = line.slice(1, -1).split('|').map(c => c.trim());
-    const isHeader = isFirstRow || line.includes('**') || cells.some(c => /^[*_]/.test(c));
-    return (
-      <tr style={{ borderBottom: '1px solid #e2e8f0', background: isHeader ? '#f1f5f9' : 'transparent' }}>
-        {cells.map((cell, i) => {
-          const Tag = isHeader ? 'th' : 'td';
-          return (
-            <Tag key={i} style={{
-              padding: '6px 8px', textAlign: i === 0 ? 'center' : (i === 1 ? 'left' : 'right'),
-              fontSize: 11, fontWeight: isHeader ? 700 : 400,
-              color: isHeader ? '#0f172a' : '#334155',
-              whiteSpace: 'nowrap'
-            }}>
-              <InlineText text={cell} />
-            </Tag>
-          );
-        })}
-      </tr>
-    );
-  }
-  return <span><InlineText text={line} /></span>;
-}
-
-/** Inline bold/italic renderer */
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline text renderer  (bold / italic)
+// ─────────────────────────────────────────────────────────────────────────────
 function InlineText({ text }) {
   const parts = String(text || '').split(/(\*\*.*?\*\*|\*.*?\*)/g);
   return (
@@ -55,12 +47,42 @@ function InlineText({ text }) {
   );
 }
 
-/** Full message renderer: handles tables, bullets, headings, normal lines */
+// ─────────────────────────────────────────────────────────────────────────────
+// Table row renderer
+// ─────────────────────────────────────────────────────────────────────────────
+function RenderLine({ line, isFirstRow }) {
+  if (line.startsWith('|') && line.endsWith('|')) {
+    if (/^\|[-:\s|]+\|$/.test(line)) return null;
+    const cells = line.slice(1, -1).split('|').map(c => c.trim());
+    const isHeader = isFirstRow || cells.some(c => /^[*_]/.test(c));
+    return (
+      <tr style={{ borderBottom: '1px solid #e2e8f0', background: isHeader ? '#f1f5f9' : 'transparent' }}>
+        {cells.map((cell, i) => {
+          const Tag = isHeader ? 'th' : 'td';
+          return (
+            <Tag key={i} style={{
+              padding: '6px 8px',
+              textAlign: i === 0 ? 'center' : (i === 1 ? 'left' : 'right'),
+              fontSize: 11, fontWeight: isHeader ? 700 : 400,
+              color: isHeader ? '#0f172a' : '#334155',
+              whiteSpace: 'nowrap'
+            }}>
+              <InlineText text={cell} />
+            </Tag>
+          );
+        })}
+      </tr>
+    );
+  }
+  return <span><InlineText text={line} /></span>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full message renderer: tables, bullets, headings, normal lines
+// ─────────────────────────────────────────────────────────────────────────────
 function RenderText({ text }) {
   if (!text) return null;
   const lines = String(text).split('\n');
-
-  // Group consecutive table rows into a <table>
   const groups = [];
   let tableBuffer = [];
 
@@ -85,7 +107,6 @@ function RenderText({ text }) {
     <>
       {groups.map((g, gi) => {
         if (g.type === 'table') {
-          // Filter out markdown separator rows
           const rows = g.lines.filter(l => !/^\|[-:\s|]+\|$/.test(l));
           return (
             <div key={gi} style={{
@@ -102,12 +123,9 @@ function RenderText({ text }) {
           );
         }
         const line = g.content;
-        // Empty line → spacing
         if (!line.trim()) return <div key={gi} style={{ height: 6 }} />;
-        // Heading: starts with #
-        if (line.startsWith('# ')) return <div key={gi} style={{ fontWeight: 800, fontSize: 14, color: '#1e3a5f', marginTop: 8 }}><InlineText text={line.slice(2)} /></div>;
+        if (line.startsWith('# '))  return <div key={gi} style={{ fontWeight: 800, fontSize: 14, color: '#1e3a5f', marginTop: 8 }}><InlineText text={line.slice(2)} /></div>;
         if (line.startsWith('## ')) return <div key={gi} style={{ fontWeight: 700, fontSize: 13, color: '#1e3a5f', marginTop: 6 }}><InlineText text={line.slice(3)} /></div>;
-        // Bullet
         if (line.startsWith('• ') || line.startsWith('- ') || line.startsWith('* ')) {
           return (
             <div key={gi} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginLeft: 4, marginBottom: 2 }}>
@@ -122,7 +140,9 @@ function RenderText({ text }) {
   );
 }
 
-/** Quick action chip button */
+// ─────────────────────────────────────────────────────────────────────────────
+// Quick action chip
+// ─────────────────────────────────────────────────────────────────────────────
 function QuickAction({ label, onClick }) {
   const [hover, setHover] = useState(false);
   return (
@@ -142,7 +162,10 @@ function QuickAction({ label, onClick }) {
         cursor: 'pointer',
         transition: 'background 0.15s, color 0.15s',
         whiteSpace: 'nowrap',
-        lineHeight: '1.4'
+        lineHeight: '1.4',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 3,
       }}
     >
       {label}
@@ -150,38 +173,109 @@ function QuickAction({ label, onClick }) {
   );
 }
 
-export default function ChatbotWidget() {
-  const [open, setOpen]         = useState(false);
-  const [messages, setMessages] = useState([WELCOME]);
-  const [input, setInput]       = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [unread, setUnread]     = useState(0);
-  const [error, setError]       = useState(null);
-  const bottomRef = useRef(null);
-  const inputRef  = useRef(null);
+// ─────────────────────────────────────────────────────────────────────────────
+// Typing suggestion strip (shown above input when idle)
+// ─────────────────────────────────────────────────────────────────────────────
+const SUGGESTIONS = [
+  'Give me all harsh braking alerts for September',
+  'Who is the safest driver?',
+  'Generate overspeed alert report this week',
+  'Fleet summary for today',
+  'Generate monthly fleet report for October 2026',
+  'Show Rohan\'s performance this month',
+  'Which vehicle has the most alerts?',
+  'Recommend drivers for a long trip',
+  'Show all critical alerts from last month',
+  'Compare Rohan and Deepak',
+];
 
-  // Voice Speech Recognition Hook
+// ─────────────────────────────────────────────────────────────────────────────
+// Main ChatbotWidget component
+// ─────────────────────────────────────────────────────────────────────────────
+export default function ChatbotWidget() {
+  const [open, setOpen]               = useState(false);
+  const [messages, setMessages]       = useState([WELCOME]);
+  const [input, setInput]             = useState('');
+  const [loading, setLoading]         = useState(false);
+  const [unread, setUnread]           = useState(0);
+  const [error, setError]             = useState(null);
+  const [suggIdx, setSuggIdx]         = useState(0);
+  const [showSugg, setShowSugg]       = useState(false);
+
+  const bottomRef  = useRef(null);
+  const inputRef   = useRef(null);
+  const suggTimer  = useRef(null);
+
+  // ── Speech synthesis (Voice output) ──────────────────────────────────────
+  const {
+    isSupported: isTtsSupported,
+    isSpeaking,
+    voiceEnabled,
+    setVoiceEnabled,
+    speak,
+    stop: stopSpeaking,
+    replay: replaySpeech,
+  } = useSpeechSynthesis();
+
+  // ── Voice hook (Speech input) ─────────────────────────────────────────────
   const {
     isListening,
     interimText,
     error: speechError,
     setError: setSpeechError,
     isSupported: isSpeechSupported,
-    toggleListening,
-    stopListening
+    toggleListening: baseToggleListening,
+    stopListening,
   } = useSpeechRecognition({
     lang: 'en-IN',
+    maxAlternatives: 3,
+    confidenceThreshold: 0.2,
+    silenceMs: 2000,       // 2 s of silence → auto-stop
+    autoSend: true,        // after silence, auto-send the message
     onTranscript: (finalText) => {
       setInput(finalText);
+      // Keep caret at end
       setTimeout(() => {
         if (inputRef.current) {
           inputRef.current.focus();
-          inputRef.current.selectionStart = inputRef.current.value.length;
-          inputRef.current.selectionEnd = inputRef.current.value.length;
+          const len = inputRef.current.value.length;
+          inputRef.current.setSelectionRange(len, len);
         }
       }, 50);
-    }
+    },
+    onAutoSend: (text) => {
+      // Called after silence timer fires — send automatically
+      if (text && text.trim()) {
+        sendMsg(text);
+      }
+    },
   });
+
+  const toggleListening = (currentInput) => {
+    // If chatbot is currently speaking, stop speech when user opens mic
+    if (isSpeaking) {
+      stopSpeaking();
+    }
+    baseToggleListening(currentInput);
+  };
+
+  // ── Rotating suggestion strip ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!open || loading || isListening) {
+      clearInterval(suggTimer.current);
+      setShowSugg(false);
+      return;
+    }
+    // Show suggestion strip when idle
+    const idle = setTimeout(() => setShowSugg(true), 2000);
+    suggTimer.current = setInterval(() => {
+      setSuggIdx(i => (i + 1) % SUGGESTIONS.length);
+    }, 4000);
+    return () => {
+      clearTimeout(idle);
+      clearInterval(suggTimer.current);
+    };
+  }, [open, loading, isListening]);
 
   useEffect(() => {
     if (open) {
@@ -190,15 +284,18 @@ export default function ChatbotWidget() {
       setTimeout(() => inputRef.current?.focus(), 120);
     } else {
       stopListening();
+      stopSpeaking();
     }
-  }, [open, stopListening]);
+  }, [open, stopListening, stopSpeaking]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  const sendMsg = async (text) => {
+  // ── Send message ──────────────────────────────────────────────────────────
+  const sendMsg = useCallback(async (text) => {
     stopListening();
+    setShowSugg(false);
     const msg = (text || input).trim();
     if (!msg || loading) return;
     setInput('');
@@ -221,10 +318,15 @@ export default function ChatbotWidget() {
         data: res.data,
         askingForClarification: res.askingForClarification,
         quickActions: res.quickActions || [],
-        ts: new Date()
+        ts: new Date(),
       };
       setMessages(prev => [...prev, botMsg]);
       if (!open) setUnread(u => u + 1);
+
+      // Automatically speak the response if voice is enabled
+      if (res.message && res.message.trim()) {
+        speak(res.message);
+      }
     } catch (e) {
       const isNetworkErr = !e?.response || e?.response?.status === 0;
       const errText = isNetworkErr
@@ -235,13 +337,19 @@ export default function ChatbotWidget() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [input, loading, open, stopListening, setSpeechError, speak]);
 
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
   };
 
-  const reset = () => { setMessages([WELCOME]); setError(null); clearSession(); };
+  const reset = () => {
+    stopSpeaking();
+    stopListening();
+    setMessages([WELCOME]);
+    setError(null);
+    clearSession();
+  };
 
   const ts = (date) => date?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -279,7 +387,8 @@ export default function ChatbotWidget() {
       {/* ===== Chat window ===== */}
       {open && (
         <div className="chatbot-window" id="chatbot-window">
-          {/* Header */}
+
+          {/* ── Header ── */}
           <div style={{
             background: 'linear-gradient(135deg,#1e3a5f,#2563eb)',
             padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0
@@ -296,15 +405,52 @@ export default function ChatbotWidget() {
                 Fleet Assistant
                 <Zap size={11} color="#fbbf24" />
               </div>
-              <div style={{ color: 'rgba(255,255,255,.65)', fontSize: 10 }}>
-                {loading ? '⟳ Thinking...' : '● Live Fleet Data'}
+              <div style={{ color: 'rgba(255,255,255,.75)', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {loading ? '⟳ Thinking...' : isSpeaking ? '🔊 Speaking aloud...' : isListening ? '🎙️ Listening...' : '● Live Fleet Data'}
               </div>
             </div>
+
+            {/* Speaker Toggle */}
+            {isTtsSupported && (
+              <button
+                id="chatbot-speaker-toggle-btn"
+                onClick={() => setVoiceEnabled(v => !v)}
+                title={voiceEnabled ? 'Automatic speech: ON (Click to mute)' : 'Automatic speech: OFF (Click to unmute)'}
+                style={{
+                  background: voiceEnabled ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
+                  border: 'none', color: '#fff',
+                  cursor: 'pointer', padding: '4px 8px', fontSize: 11, borderRadius: 6,
+                  display: 'flex', alignItems: 'center', gap: 4, transition: 'all .2s'
+                }}
+              >
+                {voiceEnabled ? <Volume2 size={13} color="#93c5fd" /> : <VolumeX size={13} color="rgba(255,255,255,0.6)" />}
+                <span style={{ fontSize: 10, fontWeight: 600 }}>{voiceEnabled ? 'Voice' : 'Muted'}</span>
+              </button>
+            )}
+
+            {/* Stop ongoing speech button */}
+            {isSpeaking && (
+              <button
+                id="chatbot-stop-speech-btn"
+                onClick={stopSpeaking}
+                title="Stop speaking"
+                style={{
+                  background: '#ef4444', border: 'none', color: '#fff',
+                  cursor: 'pointer', padding: '4px 7px', fontSize: 10, fontWeight: 700, borderRadius: 6,
+                  display: 'flex', alignItems: 'center', gap: 3
+                }}
+              >
+                <Square size={9} fill="#fff" /> Stop
+              </button>
+            )}
+
             <button id="chatbot-clear-btn" onClick={reset} title="Clear chat"
-              style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,.65)',
+              style={{
+                background: 'none', border: 'none', color: 'rgba(255,255,255,.7)',
                 cursor: 'pointer', padding: 4, fontSize: 11, borderRadius: 4,
-                display: 'flex', alignItems: 'center', gap: 4 }}>
-              <RefreshCw size={13} /> Clear
+                display: 'flex', alignItems: 'center', gap: 3
+              }}>
+              <RefreshCw size={12} /> Clear
             </button>
             <button id="chatbot-close-btn" onClick={() => setOpen(false)}
               style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', padding: 4 }}>
@@ -312,7 +458,36 @@ export default function ChatbotWidget() {
             </button>
           </div>
 
-          {/* Messages area */}
+          {/* ── Speaking indicator banner ── */}
+          {isSpeaking && (
+            <div style={{
+              padding: '6px 14px', background: 'linear-gradient(90deg, #ecfdf5, #d1fae5)',
+              borderBottom: '1px solid #a7f3d0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              fontSize: 11, color: '#065f46', flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <span style={{ width: 3, height: 10, background: '#10b981', borderRadius: 2, animation: 'soundWave 0.8s ease-in-out infinite' }} />
+                  <span style={{ width: 3, height: 14, background: '#10b981', borderRadius: 2, animation: 'soundWave 0.8s ease-in-out 0.2s infinite' }} />
+                  <span style={{ width: 3, height: 8, background: '#10b981', borderRadius: 2, animation: 'soundWave 0.8s ease-in-out 0.4s infinite' }} />
+                </span>
+                <span style={{ fontWeight: 600 }}>Speaking answer aloud…</span>
+              </div>
+              <button
+                onClick={stopSpeaking}
+                style={{
+                  background: '#10b981', border: 'none', borderRadius: 4,
+                  color: '#fff', cursor: 'pointer', padding: '2px 8px', fontSize: 10, fontWeight: 600,
+                  display: 'flex', alignItems: 'center', gap: 3
+                }}
+              >
+                <Square size={8} fill="#fff" /> Stop
+              </button>
+            </div>
+          )}
+
+          {/* ── Messages area ── */}
           <div style={{ flex: '1 1 0', minHeight: 0, overflowY: 'auto', padding: '12px 14px', background: '#f8fafc' }}>
             {messages.map((m, i) => (
               <div key={i} style={{
@@ -344,7 +519,7 @@ export default function ChatbotWidget() {
                     <RenderText text={m.text} />
                   </div>
 
-                  {/* PDF card if report was generated */}
+                  {/* PDF action card */}
                   {m.reportId && (
                     <div style={{
                       marginTop: 8, background: '#fff', border: '1px solid #bfdbfe',
@@ -397,9 +572,28 @@ export default function ChatbotWidget() {
                     </div>
                   )}
 
-                  <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4,
-                    textAlign: m.role === 'user' ? 'right' : 'left' }}>
-                    {ts(m.ts)}
+                  <div style={{
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: m.role === 'user' ? 'flex-end' : 'space-between',
+                    marginTop: 4, fontSize: 10, color: '#94a3b8'
+                  }}>
+                    {m.role === 'bot' && isTtsSupported && m.text && (
+                      <button
+                        onClick={() => replaySpeech(m.text)}
+                        title="Replay this response aloud"
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: '#64748b', display: 'flex', alignItems: 'center', gap: 3,
+                          padding: '2px 4px', borderRadius: 4, fontSize: 10,
+                          transition: 'color .15s'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#2563eb'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
+                      >
+                        <RotateCcw size={10} /> Replay
+                      </button>
+                    )}
+                    <span>{ts(m.ts)}</span>
                   </div>
                 </div>
               </div>
@@ -433,7 +627,30 @@ export default function ChatbotWidget() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Speech / Error feedback banner */}
+          {/* ── Rotating suggestion strip (shown when idle) ── */}
+          {showSugg && !loading && !isListening && !input && (
+            <div
+              onClick={() => setInput(SUGGESTIONS[suggIdx])}
+              style={{
+                padding: '6px 14px',
+                background: 'linear-gradient(90deg,#f0f9ff,#eff6ff)',
+                borderTop: '1px solid #dbeafe',
+                display: 'flex', alignItems: 'center', gap: 6,
+                cursor: 'pointer',
+                fontSize: 11, color: '#1e40af',
+                flexShrink: 0,
+                transition: 'background .2s',
+              }}
+              title="Click to use this suggestion"
+            >
+              <ChevronRight size={12} style={{ flexShrink: 0, opacity: 0.7 }} />
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Try: <em>"{SUGGESTIONS[suggIdx]}"</em>
+              </span>
+            </div>
+          )}
+
+          {/* ── Speech error banner ── */}
           {speechError && (
             <div style={{
               padding: '6px 12px', background: '#fef2f2', borderTop: '1px solid #fecaca',
@@ -442,9 +659,7 @@ export default function ChatbotWidget() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
                 <AlertCircle size={13} style={{ flexShrink: 0 }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {speechError}
-                </span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{speechError}</span>
               </div>
               <button
                 onClick={() => setSpeechError(null)}
@@ -456,7 +671,7 @@ export default function ChatbotWidget() {
             </div>
           )}
 
-          {/* Listening Live Indicator banner */}
+          {/* ── Live listening banner ── */}
           {isListening && (
             <div style={{
               padding: '6px 14px', background: '#eff6ff', borderTop: '1px solid #bfdbfe',
@@ -466,12 +681,12 @@ export default function ChatbotWidget() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
                 <span style={{
                   width: 8, height: 8, borderRadius: '50%', background: '#ef4444',
-                  animation: 'micDotPulse 1s infinite'
+                  animation: 'micDotPulse 1s infinite', flexShrink: 0
                 }} />
-                <span style={{ fontWeight: 600 }}>Listening...</span>
+                <span style={{ fontWeight: 600 }}>Listening…</span>
                 {interimText && (
                   <span style={{ fontStyle: 'italic', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    "{interimText}"
+                    &ldquo;{interimText}&rdquo;
                   </span>
                 )}
               </div>
@@ -479,7 +694,8 @@ export default function ChatbotWidget() {
                 onClick={stopListening}
                 style={{
                   background: '#dbeafe', border: '1px solid #bfdbfe', borderRadius: 4,
-                  color: '#1e40af', cursor: 'pointer', padding: '2px 6px', fontSize: 10, fontWeight: 600
+                  color: '#1e40af', cursor: 'pointer', padding: '2px 6px', fontSize: 10, fontWeight: 600,
+                  flexShrink: 0,
                 }}
               >
                 Done
@@ -487,32 +703,38 @@ export default function ChatbotWidget() {
             </div>
           )}
 
-          {/* Input bar */}
+          {/* ── Input bar ── */}
           <div style={{
-            padding: '10px 14px', borderTop: speechError || isListening ? 'none' : '1px solid #e2e8f0', background: '#fff',
+            padding: '10px 14px',
+            borderTop: speechError || isListening ? 'none' : '1px solid #e2e8f0',
+            background: '#fff',
             display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0
           }}>
             <textarea
               ref={inputRef}
               id="chatbot-input"
-              value={input}
-              onChange={e => setInput(e.target.value)}
+              value={isListening ? (input + (interimText ? ` ${interimText}` : '')) : input}
+              onChange={e => { if (!isListening) setInput(e.target.value); }}
               onKeyDown={handleKey}
-              placeholder={isListening ? "Listening... Speak now" : "Ask about drivers, alerts, vehicles, reports…"}
+              placeholder={isListening ? 'Listening… speak now (auto-sends after 2 s silence)' : 'Ask about drivers, alerts, vehicles, reports…'}
               rows={1}
               disabled={loading}
               style={{
-                flex: 1, resize: 'none', border: isListening ? '1.5px solid #ef4444' : '1.5px solid #e2e8f0',
+                flex: 1, resize: 'none',
+                border: isListening ? '1.5px solid #ef4444' : '1.5px solid #e2e8f0',
                 borderRadius: 10, padding: '8px 12px', fontSize: 13,
                 fontFamily: 'inherit', outline: 'none', lineHeight: 1.4,
-                maxHeight: 80, overflowY: 'auto', background: isListening ? '#fff5f5' : '#f8fafc',
-                transition: 'border-color .2s, background .2s'
+                maxHeight: 80, overflowY: 'auto',
+                background: isListening ? '#fff5f5' : '#f8fafc',
+                transition: 'border-color .2s, background .2s',
+                color: isListening && interimText ? '#64748b' : '#1e293b',
+                fontStyle: isListening && interimText ? 'italic' : 'normal',
               }}
               onFocus={e => e.target.style.borderColor = isListening ? '#ef4444' : '#2563eb'}
               onBlur={e => e.target.style.borderColor = isListening ? '#ef4444' : '#e2e8f0'}
             />
 
-            {/* Microphone Button */}
+            {/* Microphone button */}
             <button
               id="chatbot-mic-btn"
               type="button"
@@ -520,10 +742,10 @@ export default function ChatbotWidget() {
               disabled={loading}
               title={
                 !isSpeechSupported
-                  ? 'Voice input not supported in this browser'
+                  ? 'Voice input not supported in this browser (use Chrome or Edge)'
                   : isListening
-                  ? 'Stop listening'
-                  : 'Speak query (en-IN)'
+                  ? 'Stop listening (or wait 2 s for auto-send)'
+                  : 'Start voice input'
               }
               style={{
                 width: 38, height: 38, borderRadius: '50%', border: 'none',
@@ -536,14 +758,14 @@ export default function ChatbotWidget() {
                 color: isListening ? '#fff' : isSpeechSupported ? '#2563eb' : '#94a3b8',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 transition: 'all .2s', flexShrink: 0,
-                boxShadow: isListening ? '0 0 0 4px rgba(239, 68, 68, 0.25)' : 'none',
-                animation: isListening ? 'micPulse 1.4s infinite' : 'none'
+                boxShadow: isListening ? '0 0 0 4px rgba(239,68,68,0.25)' : 'none',
+                animation: isListening ? 'micPulse 1.4s infinite' : 'none',
               }}
             >
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
 
-            {/* Send Button */}
+            {/* Send button */}
             <button
               id="chatbot-send-btn"
               onClick={() => sendMsg()}
@@ -554,7 +776,7 @@ export default function ChatbotWidget() {
                   ? 'linear-gradient(135deg,#2563eb,#1d4ed8)' : '#e2e8f0',
                 color: input.trim() && !loading ? '#fff' : '#94a3b8',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background .2s', flexShrink: 0
+                transition: 'background .2s', flexShrink: 0,
               }}>
               <Send size={15} />
             </button>
@@ -568,13 +790,17 @@ export default function ChatbotWidget() {
           40%            { transform: scale(1);   opacity: 1; }
         }
         @keyframes micPulse {
-          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
-          70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+          0%   { box-shadow: 0 0 0 0   rgba(239,68,68,0.6); }
+          70%  { box-shadow: 0 0 0 8px rgba(239,68,68,0);   }
+          100% { box-shadow: 0 0 0 0   rgba(239,68,68,0);   }
         }
         @keyframes micDotPulse {
-          0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.3); opacity: 0.6; }
+          0%, 100% { transform: scale(1);   opacity: 1;   }
+          50%      { transform: scale(1.3); opacity: 0.6; }
+        }
+        @keyframes soundWave {
+          0%, 100% { transform: scaleY(0.4); }
+          50%      { transform: scaleY(1.2); }
         }
       `}</style>
     </>

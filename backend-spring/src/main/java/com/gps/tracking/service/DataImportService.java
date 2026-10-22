@@ -154,14 +154,20 @@ public class DataImportService implements ApplicationRunner {
         // 2. Vehicle
         String vehicleCode = get(row, colIdx, "Vehicle ID", "").trim();
         String vehicleReg = get(row, colIdx, "Vehicle Number", "").trim();
+        String vehicleType = get(row, colIdx, "Vehicle Type", "").trim();
         String location = get(row, colIdx, "Location", "").trim();
 
         if (vehicleCode.isEmpty() || vehicleReg.isEmpty()) return false;
+        if ("car".equalsIgnoreCase(vehicleType) || "bike".equalsIgnoreCase(vehicleType) || "motorcycle".equalsIgnoreCase(vehicleType)) {
+            log.warn("Skipping unwanted car/bike record for vehicle: {} ({})", vehicleCode, vehicleType);
+            return false;
+        }
 
         final Driver finalDriver = driver;
         Vehicle vehicle = vehicleRepository.findByCode(vehicleCode).orElseGet(() ->
             vehicleRepository.save(Vehicle.builder()
                 .code(vehicleCode).registrationNumber(vehicleReg)
+                .vehicleType(!vehicleType.isEmpty() ? vehicleType : "Van")
                 .driver(finalDriver).active(true).build()));
 
         // 3. Trip

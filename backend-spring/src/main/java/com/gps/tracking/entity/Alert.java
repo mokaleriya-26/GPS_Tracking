@@ -224,6 +224,10 @@ public class Alert {
     @Column(name = "whatsapp_error", columnDefinition = "TEXT")
     private String whatsappError;
 
+    @Column(name = "is_simulation", nullable = false)
+    @Builder.Default
+    private Boolean isSimulation = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

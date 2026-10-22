@@ -78,6 +78,35 @@ public class ReportController {
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
+    @PostMapping(value = {"/driver/{driverId}/alert-based", "/driver/{driverId}/alert"})
+    @Operation(summary = "Generate alert-based driver report PDF")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverAlertBased(
+            @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
+        req.setDriverId(driverId);
+        req.setReportType("ALERT_BASED");
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
+    }
+
+    @PostMapping(value = {"/fleet/alert-based", "/fleet/alert"})
+    @Operation(summary = "Generate alert-based fleet report PDF")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetAlertBased(
+            @RequestBody ReportRequestDTO req) {
+        req.setReportType("ALERT_BASED");
+        return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetAlertReport(req)));
+    }
+
+    @PostMapping("/alert-based")
+    @Operation(summary = "Generate alert-based report (driver or fleet based on request scope)")
+    public ResponseEntity<ApiResponse<ReportResponseDTO>> generateAlertBased(
+            @RequestBody ReportRequestDTO req) {
+        req.setReportType("ALERT_BASED");
+        if (req.getDriverId() != null || req.getDriverCode() != null) {
+            return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
+        } else {
+            return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetAlertReport(req)));
+        }
+    }
+
     /**
      * POST /api/reports/overall
      * Generates an overall fleet summary for a given period.

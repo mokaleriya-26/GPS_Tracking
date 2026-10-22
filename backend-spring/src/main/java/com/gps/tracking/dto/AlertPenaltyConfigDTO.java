@@ -17,6 +17,9 @@ public class AlertPenaltyConfigDTO {
     private String alertType;
     private BigDecimal weight;
     private BigDecimal defaultFineAmount;
+    private BigDecimal penaltyIncrement;
+    private Integer warningThreshold;
+    private Boolean penaltyEnabled;
     private String description;
     private Boolean isActive;
     private String updatedBy;

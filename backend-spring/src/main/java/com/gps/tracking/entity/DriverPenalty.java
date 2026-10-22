@@ -47,6 +47,37 @@ public class DriverPenalty {
     @Column(name = "penalty_type", nullable = false, length = 50)
     private String penaltyType;
 
+    @Column(name = "alert_type", length = 100)
+    private String alertType;
+
+    @Column(name = "occurrence_number", nullable = false)
+    @Builder.Default
+    private Integer occurrenceNumber = 1;
+
+    @Column(name = "classification", nullable = false, length = 30)
+    @Builder.Default
+    private String classification = "WARNING";
+
+    @Column(name = "base_penalty", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal basePenalty = BigDecimal.ZERO;
+
+    @Column(name = "penalty_increment", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal penaltyIncrement = BigDecimal.valueOf(30.00);
+
+    @Column(name = "calculation_timestamp", nullable = false)
+    @Builder.Default
+    private LocalDateTime calculationTimestamp = LocalDateTime.now();
+
+    @Column(name = "processing_status", nullable = false, length = 30)
+    @Builder.Default
+    private String processingStatus = "COMPLETED";
+
+    @Column(name = "notification_status", nullable = false, length = 30)
+    @Builder.Default
+    private String notificationStatus = "PENDING";
+
     @Column(name = "reason", nullable = false, columnDefinition = "TEXT")
     private String reason;
 
@@ -83,6 +114,10 @@ public class DriverPenalty {
 
     @Column(name = "notes", columnDefinition = "TEXT")
     private String notes;
+
+    @Column(name = "is_simulation", nullable = false)
+    @Builder.Default
+    private Boolean isSimulation = false;
 
     @Column(name = "created_at", nullable = false)
     @Builder.Default

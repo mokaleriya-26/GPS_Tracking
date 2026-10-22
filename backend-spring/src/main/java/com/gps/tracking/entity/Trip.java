@@ -99,6 +99,10 @@ public class Trip {
     @Column(name = "primary_road", length = 255)
     private String primaryRoad;
 
+    @Column(name = "is_simulation", nullable = false)
+    @Builder.Default
+    private Boolean isSimulation = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

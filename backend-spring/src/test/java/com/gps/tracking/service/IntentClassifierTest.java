@@ -201,6 +201,36 @@ class IntentClassifierTest {
     }
 
     @Test
+    void testAlertReportIntent() {
+        // Explicit alert-based report phrases
+        assertIntent("Generate alert-based report", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate alert based report for Rohan", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate an alert report", IntentClassifier.Intent.ALERT_REPORT);
+
+        // "give me all X alerts for <period>" — canonical chatbot pattern
+        assertIntent("Give me all harsh braking alerts for September", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Give me all overspeed alerts this week", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Give me all critical alerts from last month", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Give me all unresolved alerts this month", IntentClassifier.Intent.ALERT_REPORT);
+
+        // "generate report for X alert type"
+        assertIntent("Generate a report for overspeed alerts this week", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate harsh braking alert report for October", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate overspeed alert report this week", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate a report for night driving alerts last month", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Generate GPS disconnect alert report for Rohan this month", IntentClassifier.Intent.ALERT_REPORT);
+
+        // report + alert + specific type or severity
+        assertIntent("Show critical alert report for last month", IntentClassifier.Intent.ALERT_REPORT);
+        assertIntent("Overspeed alert report for DRV001", IntentClassifier.Intent.ALERT_REPORT);
+
+        // ALERT_QUERY must still work (no "generate"/"report" keyword, just queries)
+        assertIntent("Show unresolved critical alerts", IntentClassifier.Intent.ALERT_QUERY);
+        assertIntent("How many overspeed alerts?", IntentClassifier.Intent.ALERT_QUERY);
+        assertIntent("Show open alerts", IntentClassifier.Intent.ALERT_QUERY);
+    }
+
+    @Test
     void testUnknownRequests() {
         assertIntent("book a flight ticket to London", IntentClassifier.Intent.UNKNOWN);
         assertIntent("order a pizza for dinner", IntentClassifier.Intent.UNKNOWN);

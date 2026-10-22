@@ -10,5 +10,6 @@ import java.util.Optional;
 @Repository
 public interface AlertPenaltyConfigRepository extends JpaRepository<AlertPenaltyConfig, Long> {
     Optional<AlertPenaltyConfig> findByAlertType(String alertType);
+    Optional<AlertPenaltyConfig> findByAlertTypeIgnoreCase(String alertType);
     List<AlertPenaltyConfig> findByIsActiveTrue();
 }

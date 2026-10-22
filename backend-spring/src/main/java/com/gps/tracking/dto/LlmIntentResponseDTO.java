@@ -25,7 +25,7 @@ public class LlmIntentResponseDTO {
      * FLEET_SUMMARY, DRIVER_RANKING, DRIVER_RECOMMENDATION,
      * DRIVER_STATS, DRIVER_REPORT, VEHICLE_STATS, VEHICLE_ALERT_ANALYSIS,
      * OVERALL_REPORT, FLEET_REPORT, REPORT_CLARIFICATION,
-     * ALERT_QUERY, TRIP_QUERY, ENTRY_EXIT, COMPARE_DRIVERS,
+     * ALERT_QUERY, ALERT_REPORT, TRIP_QUERY, ENTRY_EXIT, COMPARE_DRIVERS,
      * CLARIFICATION_NEEDED, UNKNOWN
      */
     private String intent;
@@ -81,9 +81,19 @@ public class LlmIntentResponseDTO {
     private String yearMonth;
 
     /**
-     * Specific alert type if mentioned (e.g. "Overspeed", "Harsh Braking")
+     * Specific alert type if mentioned (e.g. "Overspeed Alert", "Harsh Braking Alert")
      */
     private String alertType;
+
+    /**
+     * Severity filter for alert-based reports: CRITICAL, WARNING, INFO
+     */
+    private String severityHint;
+
+    /**
+     * Status filter for alert-based reports: OPEN, RESOLVED, HISTORICAL
+     */
+    private String statusHint;
 
     /**
      * Ranking or recommendation limit if specified (e.g. 3, 5, 10)

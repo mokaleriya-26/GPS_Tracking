@@ -12,6 +12,7 @@ public class DriverDTO {
     private String code;
     private String name;
     private String phone;
+    private String email;
     private String licenseNumber;
     private LocalDate joinedOn;
     private Boolean active;

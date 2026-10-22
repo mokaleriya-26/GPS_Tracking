@@ -3,10 +3,12 @@ import { Card, Row, Col, Badge, Table, Button } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import {
   Car, Bell, Users, Navigation, TrendingUp,
-  AlertTriangle, Shield, Activity, RefreshCw
+  AlertTriangle, Shield, Activity, RefreshCw,
+  AlertCircle, Scale, IndianRupee
 } from 'lucide-react';
 import { getDriverRanking } from '../api/drivers';
 import { getTrips } from '../api/trips';
+import { getFleetPenaltySummary } from '../api/penalties';
 
 // Spring Boot VehicleDTO field names
 const getVehicleReg = (v) => v.registrationNumber || v.registration_number || v.number || v.code || '—';
@@ -51,29 +53,38 @@ const StatCard = ({ icon, label, value, sub, color, to }) => (
   </Col>
 );
 
-const Dashboard = ({ vehicles = [], alerts = [] }) => {
+const Dashboard = ({ vehicles = [], alerts = [], alertSummary = null }) => {
   const [ranking, setRanking] = useState([]);
   const [recentTrips, setRecentTrips] = useState([]);
+  const [penaltySummary, setPenaltySummary] = useState(null);
   const [loadingExtra, setLoadingExtra] = useState(true);
 
   useEffect(() => {
     setLoadingExtra(true);
     Promise.all([
       getDriverRanking().catch(() => []),
-      getTrips({ page: 0, size: 5 }).catch(() => [])
-    ]).then(([rank, trips]) => {
+      getTrips({ page: 0, size: 5 }).catch(() => []),
+      getFleetPenaltySummary().catch(() => null)
+    ]).then(([rank, trips, penalties]) => {
       setRanking(Array.isArray(rank) ? rank.slice(0, 5) : []);
       const tripList = Array.isArray(trips) ? trips : (trips?.content || []);
       setRecentTrips(tripList.slice(0, 5));
+      if (penalties) setPenaltySummary(penalties);
     }).finally(() => setLoadingExtra(false));
   }, []);
 
-  // Computed stats
+  const formatINR = (amt) => {
+    if (amt == null) return '₹0.00';
+    const n = typeof amt === 'number' ? amt : parseFloat(amt) || 0;
+    return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
+  // Computed stats from real PostgreSQL summary or client-computed fallback
   const activeVehicles = vehicles.filter(v => isActive(v)).length;
-  const criticalAlertCount = alerts.filter(a => isCritical(a) && !isHistorical(a)).length;
-  const openAlerts = alerts.filter(a => a.status === 'OPEN').length;
-  const historicalAlerts = alerts.filter(a => isHistorical(a)).length;
-  const totalAlerts = alerts.length;
+  const criticalAlertCount = alertSummary?.criticalAlerts ?? alerts.filter(a => isCritical(a) && !isHistorical(a)).length;
+  const openAlerts = alertSummary?.openAlerts ?? alerts.filter(a => a.status === 'OPEN').length;
+  const historicalAlerts = alertSummary?.historicalAlerts ?? alerts.filter(a => isHistorical(a)).length;
+  const totalAlerts = alertSummary?.totalAlerts ?? alerts.length;
 
   const scoreColor = (s) => {
     if (s == null) return '#94a3b8';
@@ -105,8 +116,8 @@ const Dashboard = ({ vehicles = [], alerts = [] }) => {
         </Badge>
       </div>
 
-      {/* KPI Row */}
-      <Row className="g-3 mb-4">
+      {/* Standard KPI Row */}
+      <Row className="g-3 mb-3">
         <StatCard icon={<Car />} label="Total Vehicles" value={vehicles.length}
           sub={`${activeVehicles} currently active`} color="#2563eb" />
         <StatCard icon={<Users />} label="Drivers" value={ranking.length || '—'}
@@ -115,6 +126,21 @@ const Dashboard = ({ vehicles = [], alerts = [] }) => {
           sub={criticalAlertCount > 0 ? `${criticalAlertCount} critical` : 'All clear'} color="#dc2626" />
         <StatCard icon={<Shield />} label="Historical" value={historicalAlerts}
           sub="silenced (CSV import)" color="#64748b" />
+      </Row>
+
+      {/* Progressive Penalty KPI Row */}
+      <Row className="g-3 mb-4">
+        <StatCard icon={<IndianRupee />} label="Fleet Penalties" value={formatINR(penaltySummary?.totalFleetPenalties)}
+          sub={`${penaltySummary?.totalPenaltyBearingAlerts ?? 0} penalty-bearing alerts`} color="#dc2626" />
+        <StatCard icon={<AlertCircle />} label="Warning-Only Alerts" value={penaltySummary?.totalWarningOnlyAlerts ?? 0}
+          sub="₹0.00 penalty applied" color="#d97706" />
+        <StatCard icon={<TrendingUp />} label="Top Penalized Driver"
+          value={penaltySummary?.highestPenalizedDriverCode || '—'}
+          sub={penaltySummary?.highestPenalizedDriverName ? `${penaltySummary.highestPenalizedDriverName} (${formatINR(penaltySummary.highestDriverPenaltyTotal)})` : 'No penalties recorded'}
+          color="#7c3aed" />
+        <StatCard icon={<Scale />} label="Penalty Types"
+          value={penaltySummary?.penaltyBreakdownByAlertType ? Object.keys(penaltySummary.penaltyBreakdownByAlertType).length : 0}
+          sub="Configured violation types" color="#059669" />
       </Row>
 
       <Row className="g-3">
@@ -172,7 +198,7 @@ const Dashboard = ({ vehicles = [], alerts = [] }) => {
           </Card>
 
           {/* Recent Trips */}
-          <Card className="border-0 shadow-sm" style={{ borderRadius: 14 }}>
+          <Card className="border-0 shadow-sm mb-3" style={{ borderRadius: 14 }}>
             <Card.Header className="bg-white border-0 py-3 px-4 d-flex justify-content-between align-items-center">
               <h5 className="mb-0 fw-bold" style={{ fontSize: 15 }}>
                 <Navigation size={16} className="me-2 text-primary" />
@@ -215,6 +241,83 @@ const Dashboard = ({ vehicles = [], alerts = [] }) => {
                 </tbody>
               </Table>
             </div>
+          </Card>
+
+          {/* Progressive Penalties Ledger & Breakdown */}
+          <Card className="border-0 shadow-sm" style={{ borderRadius: 14 }}>
+            <Card.Header className="bg-white border-0 py-3 px-4 d-flex justify-content-between align-items-center">
+              <h5 className="mb-0 fw-bold" style={{ fontSize: 15 }}>
+                <Scale size={16} className="me-2 text-danger" />
+                Progressive Penalties & Recent Ledger
+              </h5>
+              <Button as={Link} to="/settings" variant="outline-danger" size="sm" style={{ borderRadius: 8 }}>
+                Manage Rules
+              </Button>
+            </Card.Header>
+            <Card.Body className="p-4 pt-1">
+              {/* Alert Type Breakdown Chips */}
+              <div className="mb-3">
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  Penalties by Alert Type
+                </div>
+                <div className="d-flex flex-wrap gap-2">
+                  {penaltySummary?.penaltyBreakdownByAlertType && Object.entries(penaltySummary.penaltyBreakdownByAlertType).map(([type, total]) => (
+                    <Badge key={type} bg="light" text="dark" className="border px-2 py-1 d-flex align-items-center gap-1" style={{ fontSize: 12 }}>
+                      <span className="fw-semibold">{type}:</span>
+                      <span className="text-danger fw-bold">{formatINR(total)}</span>
+                      {penaltySummary.alertCountByAlertType?.[type] != null && (
+                        <span className="text-muted ms-1">({penaltySummary.alertCountByAlertType[type]} events)</span>
+                      )}
+                    </Badge>
+                  ))}
+                  {(!penaltySummary?.penaltyBreakdownByAlertType || Object.keys(penaltySummary.penaltyBreakdownByAlertType).length === 0) && (
+                    <span className="text-muted" style={{ fontSize: 12 }}>No penalty-bearing alerts recorded yet.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Penalties Table */}
+              <div className="table-responsive">
+                <Table hover className="mb-0 align-middle" style={{ fontSize: 13 }}>
+                  <thead style={{ background: '#f8fafc', fontSize: 12 }}>
+                    <tr>
+                      <th className="py-2 border-0">Driver</th>
+                      <th className="py-2 border-0">Alert Type</th>
+                      <th className="py-2 border-0">Occur #</th>
+                      <th className="py-2 border-0">Classification</th>
+                      <th className="py-2 border-0">Fine</th>
+                      <th className="py-2 border-0">Applied Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(penaltySummary?.recentPenalties || []).slice(0, 5).map((p, i) => (
+                      <tr key={p.id || i}>
+                        <td className="fw-semibold">{p.driverName || '—'} <span className="text-muted" style={{ fontSize: 11 }}>({p.driverCode})</span></td>
+                        <td>{p.alertType || '—'}</td>
+                        <td>
+                          <Badge bg="secondary" style={{ fontSize: 11 }}>#{p.occurrenceNumber || 1}</Badge>
+                        </td>
+                        <td>
+                          <Badge bg={p.classification === 'PENALTY' ? 'danger' : 'warning'}
+                            text={p.classification === 'PENALTY' ? 'white' : 'dark'} style={{ fontSize: 11 }}>
+                            {p.classification || 'WARNING'}
+                          </Badge>
+                        </td>
+                        <td className="fw-bold" style={{ color: p.classification === 'PENALTY' ? '#dc2626' : '#64748b' }}>
+                          {formatINR(p.monetaryAmount)}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{formatTime(p.dateApplied)}</td>
+                      </tr>
+                    ))}
+                    {(!penaltySummary?.recentPenalties || penaltySummary.recentPenalties.length === 0) && (
+                      <tr>
+                        <td colSpan={6} className="text-center text-muted py-3">No recent penalties recorded</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </Table>
+              </div>
+            </Card.Body>
           </Card>
         </Col>
 
@@ -298,6 +401,17 @@ const Dashboard = ({ vehicles = [], alerts = [] }) => {
                           {getAlertDriver(a)} · {getAlertVehicle(a)}
                         </div>
                         <div style={{ fontSize: 10, color: '#94a3b8' }}>{formatTime(getAlertTime(a))}</div>
+                        {a.occurrenceNumber != null && (
+                          <div className="mt-1 d-flex align-items-center gap-1" style={{ fontSize: 10 }}>
+                            <Badge bg={a.penaltyClassification === 'PENALTY' ? 'danger' : 'warning'}
+                              text={a.penaltyClassification === 'PENALTY' ? 'white' : 'dark'} style={{ fontSize: 9 }}>
+                              #{a.occurrenceNumber} {a.penaltyClassification || 'Warning'}
+                            </Badge>
+                            <span className="fw-semibold" style={{ color: a.penaltyClassification === 'PENALTY' ? '#dc2626' : '#64748b' }}>
+                              {formatINR(a.penaltyAmount)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

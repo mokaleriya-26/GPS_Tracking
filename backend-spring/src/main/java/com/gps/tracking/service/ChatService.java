@@ -44,6 +44,11 @@ public class ChatService {
     private final ReportService reportService;
     private final IntentClassifier intentClassifier;
     private final LlmService llmService;
+    private final MaintenanceRepository maintenanceRepository;
+    private final CostRepository costRepository;
+    private final PenaltyService penaltyService;
+    private final DriverPenaltyRepository penaltyRepository;
+    private final SimulationService simulationService;
 
     // In-memory session context for multi-turn dialogue
     private final Map<String, Map<String, String>> sessionContext = new HashMap<>();
@@ -74,6 +79,49 @@ public class ChatService {
         if (message == null) message = "";
         String normalized = message.toLowerCase().trim();
         log.info("Chat [{}]: {}", sessionId, message);
+
+        // Handle explicit cancellation
+        if (normalized.equals("cancel") || normalized.equals("stop") || normalized.equals("reset") || normalized.equals("nevermind") || normalized.equals("never mind")) {
+            ctx.remove("awaiting_report_type");
+            ctx.remove("awaiting_driver");
+            ctx.remove("awaiting_vehicle");
+            ctx.remove("awaiting_month");
+            ctx.remove("pending_intent");
+            ctx.remove("pending_driver_id");
+            ctx.remove("pending_vehicle_id");
+            ctx.remove("pending_report_type");
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("GENERAL_QUESTION")
+                .message("Understood! The previous request has been cancelled. What else would you like to know?")
+                .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver", "⚠️ Show Open Alerts"))
+                .build();
+        }
+
+        // If user is asking an explicit new query, cancel any stale clarification state so it is never hijacked!
+        boolean isExplicitNewQuery = normalized.matches("^(which|who|what|how|rank|show|list|tell|top|safest|compare|recommend|give|generate|create).*")
+            || normalized.contains("?")
+            || normalized.contains("alert")
+            || normalized.contains("violation")
+            || normalized.contains("ranking");
+
+        if (isExplicitNewQuery) {
+            ctx.remove("awaiting_report_type");
+            ctx.remove("awaiting_driver");
+            ctx.remove("awaiting_vehicle");
+            ctx.remove("awaiting_month");
+            ctx.remove("pending_intent");
+            ctx.remove("pending_driver_id");
+            ctx.remove("pending_vehicle_id");
+            ctx.remove("pending_report_type");
+        }
+
+        // =========================================================
+        // 0. LIVE SIMULATION QUERIES
+        // =========================================================
+        if (normalized.contains("simulat") || normalized.contains("simulation")) {
+            return handleSimulationQuery(sessionId, normalized, message);
+        }
 
         // =========================================================
         // 1. CONTEXT RESUMPTION (Awaiting Clarification)
@@ -179,7 +227,8 @@ public class ChatService {
         // =========================================================
         // 3. INTENT CLASSIFICATION VIA NLP ENGINE (Fallback or Primary)
         // =========================================================
-        if (classified == null || classified.getIntent() == IntentClassifier.Intent.UNKNOWN) {
+        if (classified == null || classified.getIntent() == IntentClassifier.Intent.UNKNOWN
+                || normalized.contains("penalt") || normalized.contains("warning-only") || normalized.contains("fine") || normalized.contains("monetary") || normalized.contains("fines")) {
             classified = intentClassifier.classify(message);
         }
         IntentClassifier.Intent intent = classified.getIntent();
@@ -207,17 +256,32 @@ public class ChatService {
             case DRIVER_RANKING:
                 return handleDriverRanking(sessionId, normalized, classified, ctx);
 
+            case DRIVER_ALERT_COUNT:
+                return handleDriverAlertCount(sessionId, normalized, classified, ctx);
+
             case DRIVER_REPORT:
                 return handleDriverReportIntent(sessionId, normalized, message, classified, ctx);
 
             case DRIVER_STATS:
                 return handleDriverStats(sessionId, normalized, ctx);
 
+            case VEHICLE_RANKING:
+                return handleVehicleRanking(sessionId, normalized, classified, ctx);
+
             case VEHICLE_ALERT_ANALYSIS:
                 return handleVehicleAlertAnalysis(sessionId, normalized, ctx);
 
             case VEHICLE_STATS:
                 return handleVehicleQueryOrStats(sessionId, normalized, ctx);
+
+            case MAINTENANCE_QUERY:
+                return handleMaintenanceQuery(sessionId, normalized, ctx);
+
+            case COST_QUERY:
+                return handleCostQuery(sessionId, normalized, ctx);
+
+            case PENALTY_QUERY:
+                return handlePenaltyQuery(sessionId, normalized, classified, ctx);
 
             case OVERALL_REPORT:
                 return handleOverallReport(sessionId, normalized, classified, ctx);
@@ -227,6 +291,9 @@ public class ChatService {
 
             case ALERT_QUERY:
                 return handleAlertQuery(sessionId, normalized, ctx);
+
+            case ALERT_REPORT:
+                return handleAlertReportIntent(sessionId, normalized, classified, ctx);
 
             case TRIP_QUERY:
                 return handleTripQuery(sessionId, normalized, classified, ctx);
@@ -496,7 +563,9 @@ public class ChatService {
 
         return ChatResponseDTO.builder()
             .sessionId(sessionId)
+            .success(true)
             .intent("VEHICLE_ALERT_ANALYSIS")
+            .source("POSTGRESQL")
             .message(sb.toString())
             .quickActions(actions)
             .build();
@@ -639,42 +708,188 @@ public class ChatService {
         return handleDriverRanking(sessionId, normalized, null, ctx);
     }
 
-    private ChatResponseDTO handleDriverRanking(String sessionId, String normalized,
-                                               IntentClassifier.ClassifiedIntent classified,
-                                               Map<String, String> ctx) {
-        DateRange dr = parseDateRange(normalized);
-        LocalDate from, to;
-        String periodLabel;
+    public static class DriverAlertRanking {
+        private final Long driverId;
+        private final String driverCode;
+        private final String driverName;
+        private final long totalAlerts;
 
-        if (dr != null) {
-            from = dr.startDate;
-            to = dr.endDate;
-            periodLabel = dr.label;
-        } else {
-            from = LocalDate.now().withDayOfMonth(1);
-            to = LocalDate.now();
-            periodLabel = "Current Month";
+        public DriverAlertRanking(Object[] row) {
+            this.driverId = ((Number) row[0]).longValue();
+            this.driverCode = String.valueOf(row[1]);
+            this.driverName = String.valueOf(row[2]);
+            this.totalAlerts = ((Number) row[3]).longValue();
         }
 
+        public Long getDriverId() { return driverId; }
+        public String getDriverCode() { return driverCode; }
+        public String getDriverName() { return driverName; }
+        public long getTotalAlerts() { return totalAlerts; }
+    }
+
+    private ChatResponseDTO handleDriverRanking(String sessionId, String normalized,
+                                                IntentClassifier.ClassifiedIntent classified,
+                                                Map<String, String> ctx) {
+        DateRange dr = parseDateRange(normalized);
+        boolean isAlertRanking = normalized.contains("alert") || normalized.contains("violation")
+            || normalized.contains("braking") || normalized.contains("overspeed") || normalized.contains("critical")
+            || normalized.contains("disconnect") || normalized.contains("highest number")
+            || (normalized.contains("rank") && !normalized.contains("safety"));
+
+        // =========================================================================
+        // A. Factual Alert-Based Ranking via PostgreSQL parameterized queries
+        // =========================================================================
+        if (isAlertRanking) {
+            String alertType = null;
+            if (normalized.contains("harsh braking") || normalized.contains("braking")) alertType = "harsh braking";
+            else if (normalized.contains("overspeed") || normalized.contains("speed")) alertType = "overspeed";
+            else if (normalized.contains("disconnect") || normalized.contains("gps")) alertType = "disconnect";
+            else if (normalized.contains("night")) alertType = "night";
+            else if (normalized.contains("fatigue")) alertType = "fatigue";
+
+            String severity = null;
+            if (normalized.contains("critical")) severity = "CRITICAL";
+            else if (normalized.contains("warning")) severity = "WARNING";
+
+            LocalDateTime startDt = dr != null ? dr.startDateTime() : null;
+            LocalDateTime endDt = dr != null ? dr.endDateTime() : null;
+            String periodLabel = dr != null ? dr.label : "All-Time";
+
+            boolean isFewest = normalized.matches(".*(fewest|least|minimum|lowest alert|lowest number).*");
+
+            List<DriverAlertRanking> rankings = (isFewest
+                ? alertRepository.findDriverAlertRankingsAsc(alertType, severity, startDt, endDt)
+                : alertRepository.findDriverAlertRankings(alertType, severity, startDt, endDt))
+                .stream().map(DriverAlertRanking::new).collect(Collectors.toList());
+
+            if (rankings.isEmpty()) {
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .success(true)
+                    .intent("DRIVER_RANKING")
+                    .source("POSTGRESQL")
+                    .message(String.format("No driver alert records found in the database for the given criteria (%s).", periodLabel))
+                    .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+                    .build();
+            }
+
+            int rankingLimit = (classified != null && classified.getRankingLimit() > 0) ? classified.getRankingLimit() : 0;
+            if (normalized.contains("top 10")) rankingLimit = 10;
+            else if (normalized.contains("top 5")) rankingLimit = 5;
+            else if (normalized.contains("top 3")) rankingLimit = 3;
+
+            boolean isSingle = rankingLimit == 1 || (rankingLimit == 0 && (
+                normalized.contains("which driver") || normalized.contains("who is") ||
+                normalized.contains("show the driver") || normalized.contains("tell me the driver") ||
+                normalized.contains("highest number") || normalized.contains("maximum alerts") ||
+                (normalized.contains("most alerts") && !normalized.contains("top") && !normalized.contains("rank"))
+            ));
+
+            if (isSingle) {
+                DriverAlertRanking top = rankings.get(0);
+
+                ctx.put("last_subject", "DRIVER");
+                ctx.put("last_driver_id", String.valueOf(top.getDriverId()));
+                ctx.put("last_driver_name", top.getDriverName());
+                ctx.put("last_driver_code", top.getDriverCode());
+
+                String typeQualifier = alertType != null ? alertType + " " : (severity != null ? severity.toLowerCase() + " " : "");
+                String msg = String.format("The driver with the %s number of %salerts%s is **%s (%s)** with **%,d alerts**.",
+                    isFewest ? "lowest" : "highest",
+                    typeQualifier,
+                    dr != null ? " in " + dr.label : "",
+                    top.getDriverName(), top.getDriverCode(), top.getTotalAlerts());
+
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("driverCode", top.getDriverCode());
+                data.put("driverName", top.getDriverName());
+                data.put("totalAlerts", top.getTotalAlerts());
+
+                Map<String, Object> filters = new LinkedHashMap<>();
+                filters.put("alertType", alertType);
+                filters.put("severity", severity);
+                filters.put("startDate", startDt);
+                filters.put("endDate", endDt);
+
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .success(true)
+                    .intent("DRIVER_RANKING")
+                    .source("POSTGRESQL")
+                    .message(msg)
+                    .data(data)
+                    .filters(filters)
+                    .quickActions(List.of("Show all alerts for " + top.getDriverCode(), "🏆 Top 5 Drivers by Alerts", "📊 Fleet Summary"))
+                    .build();
+            }
+
+            int limit = rankingLimit > 0 ? rankingLimit : 5;
+            List<DriverAlertRanking> topN = rankings.stream()
+                .limit(limit)
+                .collect(Collectors.toList());
+
+            StringBuilder table = new StringBuilder();
+            String titleType = alertType != null ? alertType.toUpperCase() + " " : (severity != null ? severity.toUpperCase() + " " : "");
+            table.append(String.format("⚠️ **Top %d Drivers by %sAlert Count%s**\n\n",
+                topN.size(), titleType, dr != null ? " (" + dr.label + ")" : ""));
+            table.append("| Rank | Driver Code | Driver Name | Total Alerts |\n");
+            table.append("|:---:|:---:|:---|---:|\n");
+
+            int rIdx = 1;
+            for (DriverAlertRanking p : topN) {
+                table.append(String.format("| %d | **%s** | %s | %,d |\n",
+                    rIdx++, p.getDriverCode(), p.getDriverName(), p.getTotalAlerts()));
+            }
+
+            DriverAlertRanking best = topN.get(0);
+            ctx.put("last_subject", "DRIVER");
+            ctx.put("last_driver_id", String.valueOf(best.getDriverId()));
+            ctx.put("last_driver_name", best.getDriverName());
+            ctx.put("last_driver_code", best.getDriverCode());
+
+            Map<String, Object> filters = new LinkedHashMap<>();
+            filters.put("alertType", alertType);
+            filters.put("severity", severity);
+            filters.put("startDate", startDt);
+            filters.put("endDate", endDt);
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .success(true)
+                .intent("DRIVER_RANKING")
+                .source("POSTGRESQL")
+                .message(table.toString())
+                .data(topN)
+                .filters(filters)
+                .quickActions(List.of("Details for " + best.getDriverCode(), "🏆 Safest Driver", "📊 Fleet Summary"))
+                .build();
+        }
+
+        // =========================================================================
+        // B. Safety Score Rankings via DriverService
+        // =========================================================================
+        LocalDate from = dr != null ? dr.startDate : LocalDate.now().minusMonths(1).withDayOfMonth(1);
+        LocalDate to = dr != null ? dr.endDate : LocalDate.now();
+        String periodLabel = dr != null ? dr.label : "Current Period";
+
         List<DriverRankingDTO> rankings = driverService.getDriverRanking(from, to);
-        if (rankings.isEmpty() && dr == null) {
+        if (rankings.isEmpty()) {
             from = LocalDate.of(2020, 1, 1);
             rankings = driverService.getDriverRanking(from, to);
             periodLabel = "All-Time";
         }
 
-        boolean sortByMostAlerts = normalized.matches(".*(most alert|highest alert|most problem|most overspeed|worst).*");
-        if (sortByMostAlerts) {
+        boolean lowestScore = normalized.contains("lowest safety") || normalized.contains("worst safety") || normalized.contains("lowest score");
+        if (lowestScore) {
             rankings = rankings.stream()
-                .sorted(Comparator.comparingLong((DriverRankingDTO r) -> r.getTotalAlerts() != null ? r.getTotalAlerts() : 0).reversed())
+                .sorted(Comparator.comparingDouble((DriverRankingDTO r) -> r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 100.0))
                 .collect(Collectors.toList());
         }
 
-        // Check if user is asking for the single safest / top driver
-        boolean askingForSingleSafest = !sortByMostAlerts && (normalized.contains("who is safest") || normalized.contains("who is the safest") ||
+        boolean askingForSingleSafest = (normalized.contains("who is safest") || normalized.contains("who is the safest") ||
             normalized.contains("which driver is safest") || normalized.contains("who has the best safety") ||
-            normalized.contains("who has the highest safety") || normalized.contains("who has the lowest risk") ||
-            normalized.contains("cleanest record") || normalized.contains("safest driver") ||
+            normalized.contains("who has the highest safety") || normalized.contains("safest driver") ||
+            normalized.contains("lowest safety score") ||
             (normalized.contains("top driver") && !normalized.contains("drivers")) ||
             (normalized.contains("best driver") && !normalized.contains("drivers")))
             && !normalized.contains("top 5") && !normalized.contains("top 3") && !normalized.contains("top 10")
@@ -683,11 +898,11 @@ public class ChatService {
         if (askingForSingleSafest && !rankings.isEmpty()) {
             DriverRankingDTO top = rankings.get(0);
             double score = top.getSafetyScore() != null ? top.getSafetyScore().doubleValue() : 0.0;
-            String singleMsg = String.format("The safest driver is **%s (%s)** with a safety score of **%.1f**, currently ranked **#1**.\n\n" +
+            String singleMsg = String.format("The driver is **%s (%s)** with a safety score of **%.1f / 100**, currently ranked **#1** (%s).\n\n" +
                 "• **Completed Trips:** %,d\n" +
                 "• **Distance:** %,.1f km\n" +
                 "• **Total Alerts:** %,d (%d overspeed, %d harsh braking)",
-                top.getDriverName(), top.getDriverCode(), score,
+                top.getDriverName(), top.getDriverCode(), score, periodLabel,
                 top.getTripCount() != null ? top.getTripCount() : 0,
                 top.getTotalDistanceKm() != null ? top.getTotalDistanceKm().doubleValue() : 0.0,
                 top.getTotalAlerts() != null ? top.getTotalAlerts() : 0,
@@ -701,8 +916,11 @@ public class ChatService {
 
             return ChatResponseDTO.builder()
                 .sessionId(sessionId)
+                .success(true)
                 .intent("DRIVER_RANKING")
+                .source("POSTGRESQL")
                 .message(singleMsg)
+                .data(top)
                 .quickActions(List.of("🏆 Top 5 Drivers", "🌟 Recommend Drivers", "📊 Fleet Summary", "📄 " + top.getDriverCode() + " Report"))
                 .build();
         }
@@ -716,25 +934,16 @@ public class ChatService {
         if (topN.isEmpty()) {
             return ChatResponseDTO.builder()
                 .sessionId(sessionId)
+                .success(true)
                 .intent("DRIVER_RANKING")
-                .message(String.format("No driver rankings available for **%s** (%s to %s).", periodLabel, from, to))
+                .source("POSTGRESQL")
+                .message(String.format("No driver rankings available for **%s**.", periodLabel))
                 .quickActions(List.of("📊 Fleet Summary", "👨 All Drivers"))
                 .build();
         }
 
         StringBuilder table = new StringBuilder();
-        if (sortByMostAlerts) {
-            table.append(String.format("⚠️ **Drivers with the Most Alerts (%s)**\n\n", periodLabel));
-        } else {
-            table.append(String.format("🏆 **Top %d Safest Drivers (%s):**\n\n", topN.size(), periodLabel));
-            int rIdx = 1;
-            for (DriverRankingDTO r : topN) {
-                table.append(String.format("%d. **%s** (%s) — **%.1f**\n",
-                    rIdx++, r.getDriverName(), r.getDriverCode(),
-                    r.getSafetyScore() != null ? r.getSafetyScore().doubleValue() : 0.0));
-            }
-            table.append("\n");
-        }
+        table.append(String.format("🏆 **Top %d Drivers by Safety Score (%s):**\n\n", topN.size(), periodLabel));
         table.append("| Rank | Driver | Safety Score | Trips | Distance | Alerts | Overspeed | Harsh Braking |\n");
         table.append("|:---:|:---|:---:|---:|---:|---:|---:|---:|\n");
 
@@ -751,31 +960,546 @@ public class ChatService {
         }
 
         DriverRankingDTO best = topN.get(0);
-        if (sortByMostAlerts) {
-            table.append(String.format("\n⚠️ **%s** has accumulated the most alerts (%d alerts across %,d trips). Consider reviewing driving patterns or safety coaching.",
-                best.getDriverName(), best.getTotalAlerts() != null ? best.getTotalAlerts() : 0, best.getTripCount() != null ? best.getTripCount() : 0));
-        } else {
-            table.append(String.format("\n🌟 **%s** is currently the safest driver with a score of **%.1f/100** across %,d trips.",
-                best.getDriverName(), best.getSafetyScore(), best.getTripCount()));
-        }
-
         ctx.put("last_subject", "DRIVER");
         ctx.put("last_driver_id", String.valueOf(best.getDriverId()));
         ctx.put("last_driver_name", best.getDriverName());
         ctx.put("last_driver_code", best.getDriverCode());
 
-        List<String> qa = new ArrayList<>();
-        qa.add("Show details for " + best.getDriverName());
-        qa.add("📊 Fleet Summary");
-        qa.add("🌟 Recommend Drivers");
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .success(true)
+            .intent("DRIVER_RANKING")
+            .source("POSTGRESQL")
+            .message(table.toString())
+            .data(topN)
+            .quickActions(List.of("Show details for " + best.getDriverName(), "📊 Fleet Summary", "🌟 Recommend Drivers"))
+            .build();
+    }
+
+    /** DRIVER ALERT COUNT HANDLER */
+    private ChatResponseDTO handleDriverAlertCount(String sessionId, String normalized,
+                                                   IntentClassifier.ClassifiedIntent classified,
+                                                   Map<String, String> ctx) {
+        Driver driver = null;
+        if (classified != null && classified.getDriverCodeHint() != null) {
+            driver = driverRepository.findByCode(classified.getDriverCodeHint()).orElse(null);
+        }
+        if (driver == null) {
+            driver = resolveDriverFromMessage(normalized, ctx);
+        }
+        if (driver == null) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .success(false)
+                .intent("DRIVER_ALERT_COUNT")
+                .source("POSTGRESQL")
+                .message("Please specify which driver you'd like to check (for example: **DRV008** or **DRV009**).")
+                .askingForClarification(true)
+                .quickActions(List.of("DRV008 Alerts", "DRV009 Alerts", "🏆 Driver Rankings"))
+                .build();
+        }
+
+        ctx.put("last_subject", "DRIVER");
+        ctx.put("last_driver_id", String.valueOf(driver.getId()));
+        ctx.put("last_driver_name", driver.getName());
+        ctx.put("last_driver_code", driver.getCode());
+
+        String alertType = null;
+        if (normalized.contains("harsh braking") || normalized.contains("braking")) alertType = "harsh braking";
+        else if (normalized.contains("overspeed") || normalized.contains("speed")) alertType = "overspeed";
+        else if (normalized.contains("disconnect") || normalized.contains("gps")) alertType = "disconnect";
+
+        String severity = null;
+        if (normalized.contains("critical")) severity = "CRITICAL";
+        else if (normalized.contains("warning")) severity = "WARNING";
+
+        DateRange dr = parseDateRange(normalized);
+        LocalDateTime startDt = dr != null ? dr.startDateTime() : null;
+        LocalDateTime endDt = dr != null ? dr.endDateTime() : null;
+
+        long alertCount = alertRepository.countAlertsByDriverWithFilters(
+            driver.getId(), alertType, severity, startDt, endDt
+        );
+
+        String typeQualifier = alertType != null ? alertType + " " : (severity != null ? severity.toLowerCase() + " " : "");
+        String msg = String.format("Driver **%s (%s)** has generated **%,d %salerts**%s.",
+            driver.getName(), driver.getCode(), alertCount,
+            typeQualifier,
+            dr != null ? " in " + dr.label : "");
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("driverCode", driver.getCode());
+        data.put("driverName", driver.getName());
+        data.put("totalAlerts", alertCount);
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("alertType", alertType);
+        filters.put("severity", severity);
+        filters.put("startDate", startDt);
+        filters.put("endDate", endDt);
 
         return ChatResponseDTO.builder()
             .sessionId(sessionId)
-            .intent("DRIVER_RANKING")
-            .message(table.toString())
-            .data(topN)
-            .quickActions(qa)
+            .success(true)
+            .intent("DRIVER_ALERT_COUNT")
+            .source("POSTGRESQL")
+            .message(msg)
+            .data(data)
+            .filters(filters)
+            .quickActions(List.of("Details for " + driver.getCode(), "🏆 Driver Rankings", "📊 Fleet Summary"))
             .build();
+    }
+
+    /** VEHICLE RANKING HANDLER */
+    private ChatResponseDTO handleVehicleRanking(String sessionId, String normalized,
+                                                 IntentClassifier.ClassifiedIntent classified,
+                                                 Map<String, String> ctx) {
+        DateRange dr = parseDateRange(normalized);
+        List<Object[]> topVehicles;
+        String periodLabel = "All-Time";
+        if (dr != null) {
+            topVehicles = alertRepository.findTopVehiclesByAlertCountInDateRange(dr.startDateTime(), dr.endDateTime());
+            periodLabel = dr.label;
+        } else {
+            topVehicles = alertRepository.findTopVehiclesByAlertCount();
+        }
+
+        if (topVehicles.isEmpty()) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .success(true)
+                .intent("VEHICLE_RANKING")
+                .source("POSTGRESQL")
+                .message("No vehicle alerts recorded for " + periodLabel + ".")
+                .build();
+        }
+
+        Object[] top = topVehicles.get(0);
+        String vCode = String.valueOf(top[1]);
+        String regNum = String.valueOf(top[2]);
+        long alertCount = ((Number) top[3]).longValue();
+
+        boolean isSingle = normalized.matches(".*(which vehicle|who is|show the vehicle|top vehicle).*") && !normalized.contains("top 5");
+        if (isSingle) {
+            String msg = String.format("The vehicle with the highest number of alerts is **%s (%s)** with **%,d alerts** (%s).",
+                regNum, vCode, alertCount, periodLabel);
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .success(true)
+                .intent("VEHICLE_RANKING")
+                .source("POSTGRESQL")
+                .message(msg)
+                .data(Map.of("vehicleCode", vCode, "registrationNumber", regNum, "totalAlerts", alertCount))
+                .quickActions(List.of("Details for " + vCode, "📊 Fleet Summary"))
+                .build();
+        }
+
+        int limit = 5;
+        if (normalized.contains("top 10")) limit = 10;
+        else if (normalized.contains("top 3")) limit = 3;
+
+        StringBuilder table = new StringBuilder();
+        table.append(String.format("🚗 **Top Vehicles by Alert Count (%s)**\n\n", periodLabel));
+        table.append("| Rank | Vehicle Code | Registration | Alert Count |\n");
+        table.append("|:---:|:---:|:---|---:|\n");
+        int rIdx = 1;
+        for (int i = 0; i < Math.min(limit, topVehicles.size()); i++) {
+            Object[] row = topVehicles.get(i);
+            table.append(String.format("| %d | **%s** | %s | %,d |\n",
+                rIdx++, row[1], row[2], ((Number) row[3]).longValue()));
+        }
+
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .success(true)
+            .intent("VEHICLE_RANKING")
+            .source("POSTGRESQL")
+            .message(table.toString())
+            .data(topVehicles.subList(0, Math.min(limit, topVehicles.size())))
+            .quickActions(List.of("📊 Fleet Summary", "🏆 Safest Driver"))
+            .build();
+    }
+
+    /** MAINTENANCE QUERY HANDLER */
+    private ChatResponseDTO handleMaintenanceQuery(String sessionId, String normalized, Map<String, String> ctx) {
+        List<MaintenanceRecord> records = maintenanceRepository.findAll();
+        long total = records.size();
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .success(true)
+            .intent("MAINTENANCE_QUERY")
+            .source("POSTGRESQL")
+            .message(String.format("🔧 There are **%,d maintenance service records** on file for the fleet.", total))
+            .quickActions(List.of("🚗 Vehicles", "📊 Fleet Summary"))
+            .build();
+    }
+
+    /** COST QUERY HANDLER */
+    private ChatResponseDTO handleCostQuery(String sessionId, String normalized, Map<String, String> ctx) {
+        List<CostRecord> records = costRepository.findAll();
+        double totalCost = records.stream()
+            .mapToDouble(c -> c.getAmountInr() != null ? c.getAmountInr().doubleValue() : 0.0)
+            .sum();
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .success(true)
+            .intent("COST_QUERY")
+            .source("POSTGRESQL")
+            .message(String.format("💰 Total fleet operating costs recorded: **₹%,.2f** across %,d cost entries.", totalCost, records.size()))
+            .quickActions(List.of("📊 Fleet Summary", "🚗 Vehicles"))
+            .build();
+    }
+
+    /** PROGRESSIVE PENALTY QUERY HANDLER (Grounded in PostgreSQL) */
+    private ChatResponseDTO handlePenaltyQuery(String sessionId, String normalized, IntentClassifier.ClassifiedIntent classified, Map<String, String> ctx) {
+        try {
+            // 1. Rules query: "what are the penalty rules for overspeeding?", "what is the penalty for a third harsh braking alert?", etc.
+            if (normalized.contains("rule") || normalized.contains("formula") || normalized.contains("how does") || normalized.contains("how do")
+                    || normalized.contains("penalty for a") || normalized.contains("fine for a") || normalized.contains("penalty for the")
+                    || (normalized.contains("penalty for") && !normalized.contains("driver") && !normalized.matches(".*\\bdrv\\d{3}\\b.*"))) {
+                String targetType = "Over-speeding Alert";
+                if (normalized.contains("brak")) targetType = "Harsh Braking Alert";
+                else if (normalized.contains("accel")) targetType = "Harsh Acceleration Alert";
+                else if (normalized.contains("fatigue")) targetType = "Fatigue Alert";
+                else if (normalized.contains("night")) targetType = "Night Driving Alert";
+                else if (normalized.contains("gps") || normalized.contains("disconnect")) targetType = "GPS Disconnect Alert";
+                else if (normalized.contains("ignition")) targetType = "Ignition Alert";
+
+                AlertPenaltyConfig config = penaltyService.resolveConfigForType(targetType);
+                BigDecimal base = config.getDefaultFineAmount();
+                BigDecimal inc = config.getPenaltyIncrement() != null ? config.getPenaltyIncrement() : BigDecimal.valueOf(30);
+                int thresh = config.getWarningThreshold() != null ? config.getWarningThreshold() : 2;
+
+                String response = String.format("""
+                    ⚖️ **Progressive Penalty Rules for %s**:
+
+                    • **Occurrence 1 & 2**: Official Warning Notification (₹0.00 penalty)
+                    • **Occurrence 3**: First Monetary Fine = Base Penalty of **₹%,.2f**
+                    • **Occurrence 4**: Base Penalty + ₹%,.2f = **₹%,.2f**
+                    • **Occurrence 5+**: Incrementally increases by **₹%,.2f** per subsequent violation
+
+                    *Formula*: Penalty for occurrence *n* (where *n* ≥ 3) = Base (₹%.0f) + (*n* - 3) × ₹%.0f.
+                    Occurrences and penalties are tracked strictly and independently per driver and alert type.
+                    """, targetType, base.doubleValue(), inc.doubleValue(), base.add(inc).doubleValue(),
+                    inc.doubleValue(), base.doubleValue(), inc.doubleValue());
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(response)
+                        .quickActions(List.of("🏆 Top Penalties", "⚠️ Warning Alerts", "📊 Fleet Penalties"))
+                        .build();
+            }
+
+            // 2. Highest penalized driver: "which driver has the highest total penalties?"
+            if (normalized.contains("highest") || normalized.contains("most penalized") || normalized.contains("maximum penalt")) {
+                FleetPenaltySummaryDTO fleet = penaltyService.getFleetPenaltySummary();
+                if (fleet.getHighestPenalizedDriverCode() == null) {
+                    return ChatResponseDTO.builder()
+                            .sessionId(sessionId)
+                            .success(true)
+                            .intent("PENALTY_QUERY")
+                            .source("POSTGRESQL")
+                            .message("✅ Currently, no driver has accumulated active financial penalties across the fleet.")
+                            .quickActions(List.of("📊 Fleet Summary", "👥 Drivers"))
+                            .build();
+                }
+
+                String msg = String.format("🚨 **Driver with Highest Cumulative Penalties**:\n\n" +
+                        "• **Driver**: %s (%s)\n" +
+                        "• **Total Accumulated Penalties**: **₹%,.2f**\n" +
+                        "• **Fleet Total Penalties**: ₹%,.2f across %,d penalty-bearing alerts.",
+                        fleet.getHighestPenalizedDriverName(), fleet.getHighestPenalizedDriverCode(),
+                        fleet.getHighestDriverPenaltyTotal().doubleValue(),
+                        fleet.getTotalFleetPenalties().doubleValue(),
+                        fleet.getTotalPenaltyBearingAlerts());
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(msg)
+                        .quickActions(List.of("🏆 Top 5 Drivers", "📊 Fleet Summary"))
+                        .build();
+            }
+
+            // 3. Top five drivers by penalties: "show the top five drivers by cumulative penalties", "list the top 5 penalized drivers", etc.
+            if (normalized.contains("top") && (normalized.contains("penalt") || normalized.contains("penaliz") || normalized.contains("fine"))) {
+                List<Object[]> rankings = penaltyRepository.findDriverPenaltyRankings();
+                if (rankings.isEmpty()) {
+                    return ChatResponseDTO.builder()
+                            .sessionId(sessionId)
+                            .success(true)
+                            .intent("PENALTY_QUERY")
+                            .source("POSTGRESQL")
+                            .message("✅ No driver penalty records found in PostgreSQL ledger.")
+                            .build();
+                }
+
+                StringBuilder sb = new StringBuilder("🏆 **Top Drivers by Cumulative Penalties**:\n\n");
+                sb.append("| Rank | Driver Code | Driver Name | Cumulative Penalties |\n");
+                sb.append("| :--- | :--- | :--- | :--- |\n");
+                int limit = Math.min(5, rankings.size());
+                for (int i = 0; i < limit; i++) {
+                    Object[] row = rankings.get(i);
+                    String code = (String) row[1];
+                    String name = (String) row[2];
+                    BigDecimal amt = (BigDecimal) row[3];
+                    sb.append(String.format("| %d | **%s** | %s | **₹%,.2f** |\n", i + 1, code, name, amt != null ? amt.doubleValue() : 0.0));
+                }
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(sb.toString())
+                        .quickActions(List.of("📊 Fleet Summary", "⚠️ Warning Alerts"))
+                        .build();
+            }
+
+            // 4. Latest alert penalty: "what penalty was applied to the latest alert?"
+            if (normalized.contains("latest alert") || normalized.contains("recent alert") || normalized.contains("last alert")) {
+                Optional<DriverPenalty> latest = penaltyRepository.findFirstByOrderByDateAppliedDesc();
+                if (latest.isEmpty()) {
+                    return ChatResponseDTO.builder()
+                            .sessionId(sessionId)
+                            .success(true)
+                            .intent("PENALTY_QUERY")
+                            .source("POSTGRESQL")
+                            .message("No penalties have been recorded for alerts yet.")
+                            .build();
+                }
+                DriverPenalty p = latest.get();
+                String driverInfo = p.getDriver() != null ? p.getDriver().getName() + " (" + p.getDriver().getCode() + ")" : "Unknown Driver";
+                String alertRef = p.getAlert() != null && p.getAlert().getReference() != null ? p.getAlert().getReference() : "N/A";
+
+                String msg = String.format("🚨 **Latest Alert Penalty Record**:\n\n" +
+                        "• **Alert Reference**: `%s`\n" +
+                        "• **Driver**: %s\n" +
+                        "• **Alert Type**: %s\n" +
+                        "• **Occurrence**: #%d (%s)\n" +
+                        "• **Applied Penalty Fine**: **₹%,.2f**\n" +
+                        "• **Applied Date**: %s\n" +
+                        "• **Status**: %s",
+                        alertRef, driverInfo, p.getAlertType(), p.getOccurrenceNumber(),
+                        p.getClassification(), p.getMonetaryAmount().doubleValue(),
+                        p.getDateApplied() != null ? p.getDateApplied().format(DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm")) : "N/A",
+                        p.getStatus());
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(msg)
+                        .quickActions(List.of("📊 Fleet Penalties", "👥 Drivers"))
+                        .build();
+            }
+
+            // 5. Zero monetary penalty count: "how many alerts have no monetary penalty?", "how many zero-monetary penalties have been issued?"
+            if (normalized.contains("no monetary") || normalized.contains("zero monetary") || normalized.contains("zero-monetary")
+                    || normalized.contains("no penalt") || normalized.contains("zero penalt") || normalized.contains("zero-penalt")
+                    || normalized.contains("without fine") || normalized.contains("without penalt")) {
+                long warnings = penaltyRepository.countByClassificationAndStatus("WARNING", "ACTIVE")
+                        + penaltyRepository.countByClassificationAndStatus("WARNING", "COMPLETED");
+                long totalAlerts = alertRepository.count();
+                long penaltyBearing = penaltyRepository.countByClassificationAndStatus("PENALTY", "ACTIVE");
+                long zeroPenaltyAlerts = totalAlerts - penaltyBearing;
+
+                String msg = String.format("🛡️ **Zero Monetary Penalty Analysis**:\n\n" +
+                        "• **Total Alerts with ₹0 Penalty**: **%,d** alerts (including %,d warning-only occurrences and historical records)\n" +
+                        "• **Penalty-Bearing Alerts**: %,d alerts\n" +
+                        "• **Total Alerts Recorded**: %,d",
+                        zeroPenaltyAlerts, warnings, penaltyBearing, totalAlerts);
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(msg)
+                        .quickActions(List.of("⚠️ Warning Alerts", "📊 Fleet Penalties"))
+                        .build();
+            }
+
+            // 6. Penalty history for a date / month: "show penalty history for September 2026"
+            YearMonth ym = extractYearMonth(normalized);
+            DateRange dr = parseDateRange(normalized);
+            if (ym != null || dr != null) {
+                LocalDateTime start = ym != null ? ym.atDay(1).atStartOfDay() : dr.startDateTime();
+                LocalDateTime end = ym != null ? ym.atEndOfMonth().plusDays(1).atStartOfDay() : dr.endDateTime();
+                String periodLabel = ym != null ? ym.getMonth().name() + " " + ym.getYear() : dr.label;
+
+                List<DriverPenalty> pList = penaltyRepository.findAll().stream()
+                        .filter(p -> p.getDateApplied() != null && !p.getDateApplied().isBefore(start) && p.getDateApplied().isBefore(end))
+                        .sorted((a, b) -> b.getDateApplied().compareTo(a.getDateApplied()))
+                        .collect(Collectors.toList());
+
+                double totalFine = pList.stream()
+                        .filter(p -> "ACTIVE".equalsIgnoreCase(p.getStatus()))
+                        .mapToDouble(p -> p.getMonetaryAmount() != null ? p.getMonetaryAmount().doubleValue() : 0.0)
+                        .sum();
+
+                long warningOnly = pList.stream().filter(p -> "WARNING".equalsIgnoreCase(p.getClassification())).count();
+                long penaltyBearing = pList.stream().filter(p -> "PENALTY".equalsIgnoreCase(p.getClassification())).count();
+
+                StringBuilder sb = new StringBuilder(String.format("📅 **Penalty History for %s**:\n\n" +
+                        "• Total Events: %,d (%d warnings, %d financial penalties)\n" +
+                        "• Total Penalties Accumulated: **₹%,.2f**\n\n",
+                        periodLabel, pList.size(), warningOnly, penaltyBearing, totalFine));
+
+                if (!pList.isEmpty()) {
+                    sb.append("| Date | Driver | Alert Type | Occur # | Classification | Fine |\n");
+                    sb.append("| :--- | :--- | :--- | :--- | :--- | :--- |\n");
+                    for (DriverPenalty p : pList.stream().limit(8).collect(Collectors.toList())) {
+                        String dCode = p.getDriver() != null ? p.getDriver().getCode() : "N/A";
+                        String dt = p.getDateApplied() != null ? p.getDateApplied().format(DateTimeFormatter.ofPattern("dd-MMM HH:mm")) : "N/A";
+                        sb.append(String.format("| %s | %s | %s | #%d | %s | ₹%,.2f |\n",
+                                dt, dCode, p.getAlertType(), p.getOccurrenceNumber(), p.getClassification(),
+                                p.getMonetaryAmount() != null ? p.getMonetaryAmount().doubleValue() : 0.0));
+                    }
+                }
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(sb.toString())
+                        .quickActions(List.of("📊 Fleet Summary", "👥 Drivers"))
+                        .build();
+            }
+
+            // 7. Driver-specific queries: "What is the total penalty for DRV009?", "How many warning-only alerts has DRV009 received?", etc.
+            Driver d = resolveDriverFromMessage(normalized, ctx);
+            if (d == null) {
+                Matcher dm = Pattern.compile("drv\\d{3}").matcher(normalized);
+                if (dm.find()) {
+                    String code = dm.group().toUpperCase();
+                    d = driverRepository.findByCode(code).orElse(null);
+                }
+            }
+
+            if (d != null) {
+                ctx.put("last_driver_id", String.valueOf(d.getId()));
+                ctx.put("last_driver_code", d.getCode());
+                ctx.put("last_driver_name", d.getName());
+                ctx.put("last_subject", "DRIVER");
+
+                DriverPenaltySummaryDTO summary = penaltyService.getDriverPenaltySummary(d.getId());
+
+                // Warning-only specific: "How many warning-only alerts has DRV009 received?"
+                if (normalized.contains("warning") || normalized.contains("warning-only") || normalized.contains("warnings")) {
+                    String msg = String.format("⚠️ **Driver %s (%s)** has received **%,d warning-only alert(s)** (₹0.00 fine applied) out of %,d total qualifying alert events.",
+                            d.getName(), d.getCode(), summary.getWarningOnlyCount(), summary.getTotalQualifyingAlerts());
+                    return ChatResponseDTO.builder()
+                            .sessionId(sessionId)
+                            .success(true)
+                            .intent("PENALTY_QUERY")
+                            .source("POSTGRESQL")
+                            .message(msg)
+                            .quickActions(List.of("💰 Total Penalties", "📊 Driver Stats"))
+                            .build();
+                }
+
+                // Specific alert type: "How many penalties has DRV009 accumulated for harsh braking?"
+                String specificType = null;
+                if (normalized.contains("brak")) specificType = "Harsh Braking Alert";
+                else if (normalized.contains("overspeed") || normalized.contains("speed")) specificType = "Over-speeding Alert";
+                else if (normalized.contains("accel")) specificType = "Harsh Acceleration Alert";
+                else if (normalized.contains("fatigue")) specificType = "Fatigue Alert";
+                else if (normalized.contains("night")) specificType = "Night Driving Alert";
+                else if (normalized.contains("gps") || normalized.contains("disconnect")) specificType = "GPS Disconnect Alert";
+
+                if (specificType != null) {
+                    BigDecimal fineForType = summary.getPenaltiesByAlertType().getOrDefault(specificType, BigDecimal.ZERO);
+                    long occurrencesForType = summary.getOccurrencesByAlertType().getOrDefault(specificType, 0L);
+
+                    String msg = String.format("🚨 **%s Penalties for Driver %s (%s)**:\n\n" +
+                            "• **Total Violations for %s**: %,d occurrence(s)\n" +
+                            "• **Penalties Accumulated for %s**: **₹%,.2f**\n" +
+                            "• **Driver Cumulative Penalties across all types**: ₹%,.2f",
+                            specificType, d.getName(), d.getCode(),
+                            specificType, occurrencesForType,
+                            specificType, fineForType.doubleValue(),
+                            summary.getTotalPenaltiesAccumulated().doubleValue());
+
+                    return ChatResponseDTO.builder()
+                            .sessionId(sessionId)
+                            .success(true)
+                            .intent("PENALTY_QUERY")
+                            .source("POSTGRESQL")
+                            .message(msg)
+                            .quickActions(List.of("💰 Cumulative Total", "📊 Driver Stats"))
+                            .build();
+                }
+
+                // General driver penalty summary: "What is the total penalty for DRV009?"
+                String msg = String.format("💰 **Progressive Penalty Summary for %s (%s)**:\n\n" +
+                        "• **Cumulative Total Penalties**: **₹%,.2f**\n" +
+                        "• **Penalty-Bearing Alerts**: %,d\n" +
+                        "• **Warning-Only Alerts**: %,d (₹0.00)\n" +
+                        "• **Total Qualifying Alerts**: %,d",
+                        d.getName(), d.getCode(),
+                        summary.getTotalPenaltiesAccumulated().doubleValue(),
+                        summary.getPenaltyBearingCount(),
+                        summary.getWarningOnlyCount(),
+                        summary.getTotalQualifyingAlerts());
+
+                return ChatResponseDTO.builder()
+                        .sessionId(sessionId)
+                        .success(true)
+                        .intent("PENALTY_QUERY")
+                        .source("POSTGRESQL")
+                        .message(msg)
+                        .quickActions(List.of("⚠️ Warning Alerts", "📊 Driver Stats", "🏆 Driver Ranking"))
+                        .build();
+            }
+
+            // Fallback: fleet penalty summary
+            FleetPenaltySummaryDTO fleet = penaltyService.getFleetPenaltySummary();
+            String msg = String.format("📊 **TrackFleet Progressive Penalty Overview**:\n\n" +
+                    "• **Total Fleet Penalties**: **₹%,.2f**\n" +
+                    "• **Penalty-Bearing Alerts**: %,d\n" +
+                    "• **Warning-Only Alerts**: %,d\n" +
+                    "• **Highest Penalized Driver**: %s (%s) — ₹%,.2f",
+                    fleet.getTotalFleetPenalties().doubleValue(),
+                    fleet.getTotalPenaltyBearingAlerts(),
+                    fleet.getTotalWarningOnlyAlerts(),
+                    fleet.getHighestPenalizedDriverName() != null ? fleet.getHighestPenalizedDriverName() : "None",
+                    fleet.getHighestPenalizedDriverCode() != null ? fleet.getHighestPenalizedDriverCode() : "N/A",
+                    fleet.getHighestDriverPenaltyTotal().doubleValue());
+
+            return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .success(true)
+                    .intent("PENALTY_QUERY")
+                    .source("POSTGRESQL")
+                    .message(msg)
+                    .quickActions(List.of("🏆 Top 5 Drivers", "⚖️ Penalty Rules", "👥 Drivers"))
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error handling progressive penalty query: {}", e.getMessage(), e);
+            return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .success(false)
+                    .intent("PENALTY_QUERY")
+                    .source("POSTGRESQL")
+                    .message("⚠️ An error occurred while retrieving penalty records from the database: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    /** Clear in-memory session context */
+    public void clearSession(String sessionId) {
+        if (sessionId != null) {
+            sessionContext.remove(sessionId);
+        }
     }
 
     // =========================================================================
@@ -1151,6 +1875,199 @@ public class ChatService {
     /** DRIVER REPORT INTENT */
     private ChatResponseDTO handleDriverReportIntent(String sessionId, String normalized, String original, Map<String, String> ctx) {
         return handleDriverReportIntent(sessionId, normalized, original, null, ctx);
+    }
+
+    // =========================================================================
+    // ALERT-BASED REPORT
+    // =========================================================================
+
+    /**
+     * Handles ALERT_REPORT intent.
+     * Resolves scope (Driver vs Fleet), builds a ReportRequestDTO with alert filters
+     * (alertTypes, severity, status, datePreset/range), invokes ReportService, and
+     * returns a ChatResponseDTO with inline PDF + download links.
+     */
+    private ChatResponseDTO handleAlertReportIntent(String sessionId, String normalized,
+                                                    IntentClassifier.ClassifiedIntent classified,
+                                                    Map<String, String> ctx) {
+        // --- 1. Resolve date range ---
+        LocalDate now = LocalDate.now();
+        LocalDate startDate, endDate;
+        String datePreset = null;
+        String periodLabel;
+
+        if (classified != null && classified.getDateFrom() != null) {
+            startDate = classified.getDateFrom();
+            endDate = classified.getDateTo() != null ? classified.getDateTo() : startDate;
+            periodLabel = startDate + " to " + endDate;
+        } else {
+            DateRange dr = parseDateRange(normalized);
+            if (dr != null) {
+                startDate = dr.startDate;
+                endDate = dr.endDate;
+                periodLabel = dr.label;
+            } else {
+                // fall back to month-name or today
+                YearMonth ym = (classified != null) ? classified.getYearMonth() : null;
+                if (ym == null) ym = extractYearMonth(normalized);
+                if (ym != null) {
+                    startDate = ym.atDay(1);
+                    endDate = ym.atEndOfMonth();
+                    periodLabel = ym.getMonth().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH) + " " + ym.getYear();
+                } else if (normalized.contains("this week")) {
+                    startDate = now.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+                    endDate = now;
+                    periodLabel = "This Week";
+                    datePreset = "THIS_WEEK";
+                } else if (normalized.contains("last week")) {
+                    LocalDate end = now.with(java.time.temporal.TemporalAdjusters.previous(java.time.DayOfWeek.SUNDAY));
+                    startDate = end.minusDays(6);
+                    endDate = end;
+                    periodLabel = "Last Week";
+                    datePreset = "LAST_WEEK";
+                } else if (normalized.contains("this month")) {
+                    startDate = now.withDayOfMonth(1);
+                    endDate = now;
+                    periodLabel = "This Month";
+                    datePreset = "THIS_MONTH";
+                } else if (normalized.contains("last month")) {
+                    LocalDate lm = now.minusMonths(1);
+                    startDate = lm.withDayOfMonth(1);
+                    endDate = lm.withDayOfMonth(lm.lengthOfMonth());
+                    periodLabel = "Last Month";
+                    datePreset = "LAST_MONTH";
+                } else if (normalized.contains("yesterday")) {
+                    startDate = now.minusDays(1);
+                    endDate = startDate;
+                    periodLabel = "Yesterday";
+                    datePreset = "YESTERDAY";
+                } else if (normalized.contains("today")) {
+                    startDate = now;
+                    endDate = now;
+                    periodLabel = "Today";
+                    datePreset = "TODAY";
+                } else {
+                    // No date specified — default to last 30 days
+                    startDate = now.minusDays(29);
+                    endDate = now;
+                    periodLabel = startDate + " to " + endDate;
+                }
+            }
+        }
+
+        // --- 2. Resolve alert type filter ---
+        String alertTypeHint = (classified != null) ? classified.getAlertTypeHint() : null;
+        List<String> alertTypes = (alertTypeHint != null) ? List.of(alertTypeHint) : null;
+
+        // --- 3. Resolve severity/status ---
+        String severity = (classified != null) ? classified.getSeverityHint() : null;
+        String status   = (classified != null) ? classified.getStatusHint()   : null;
+
+        // --- 4. Resolve scope: Driver vs Fleet ---
+        IntentClassifier.Scope scope = (classified != null) ? classified.getScope() : IntentClassifier.Scope.UNKNOWN;
+        Driver driver = null;
+        if (scope == IntentClassifier.Scope.DRIVER || classified == null ||
+                scope == IntentClassifier.Scope.UNKNOWN) {
+            // Try to extract driver
+            if (classified != null && classified.getDriverCodeHint() != null) {
+                driver = driverRepository.findByCode(classified.getDriverCodeHint()).orElse(null);
+            }
+            if (driver == null && classified != null && classified.getDriverNameHint() != null) {
+                String nameHint = classified.getDriverNameHint().toLowerCase();
+                driver = driverRepository.findAll().stream()
+                    .filter(d -> d.getName().toLowerCase().contains(nameHint))
+                    .findFirst().orElse(null);
+            }
+            if (driver == null) {
+                driver = resolveDriverFromMessage(normalized, ctx);
+            }
+            if (driver == null && ctx.containsKey("last_driver_id")) {
+                driver = driverRepository.findById(Long.parseLong(ctx.get("last_driver_id"))).orElse(null);
+            }
+        }
+
+        // Fleet scope: no specific driver, or explicitly fleet
+        boolean isFleet = (scope == IntentClassifier.Scope.FLEET) || (driver == null &&
+            (normalized.contains("fleet") || normalized.contains("all drivers") || normalized.contains("overall") || normalized.contains("company")));
+
+        // --- 5. Build request & generate ---
+        try {
+            ReportRequestDTO req = new ReportRequestDTO();
+            req.setReportType("ALERT_BASED");
+            req.setStartDate(startDate);
+            req.setEndDate(endDate);
+            if (datePreset != null) req.setDatePreset(datePreset);
+            if (alertTypes != null) req.setAlertTypes(alertTypes);
+            if (severity != null) req.setSeverity(severity);
+            if (status != null) req.setStatus(status);
+
+            String intentName;
+            ReportResponseDTO report;
+            String successMsg;
+
+            if (isFleet || driver == null) {
+                // Fleet-wide alert report
+                intentName = "FLEET_ALERT_REPORT";
+                report = reportService.generateFleetAlertReport(req);
+
+                // Build human-friendly filter summary
+                StringBuilder filterSummary = new StringBuilder();
+                if (alertTypeHint != null) filterSummary.append("• **Alert Type:** ").append(alertTypeHint).append("\n");
+                if (severity != null)      filterSummary.append("• **Severity:** ").append(severity).append("\n");
+                if (status != null)        filterSummary.append("• **Status:** ").append(status).append("\n");
+                filterSummary.append("• **Period:** ").append(periodLabel);
+
+                successMsg = String.format(
+                    "✅ **Fleet Alert-Based Report** is ready!\n\n%s\n\nClick below to view or download the PDF.",
+                    filterSummary);
+            } else {
+                // Driver-specific alert report
+                intentName = "DRIVER_ALERT_REPORT";
+                req.setDriverId(driver.getId());
+                report = reportService.generateDriverAlertReport(req);
+
+                StringBuilder filterSummary = new StringBuilder();
+                filterSummary.append("• **Driver:** ").append(driver.getName()).append(" (").append(driver.getCode()).append(")\n");
+                if (alertTypeHint != null) filterSummary.append("• **Alert Type:** ").append(alertTypeHint).append("\n");
+                if (severity != null)      filterSummary.append("• **Severity:** ").append(severity).append("\n");
+                if (status != null)        filterSummary.append("• **Status:** ").append(status).append("\n");
+                filterSummary.append("• **Period:** ").append(periodLabel);
+
+                successMsg = String.format(
+                    "✅ **Alert-Based Report for %s** is ready!\n\n%s\n\nClick below to view or download the PDF.",
+                    driver.getName(), filterSummary);
+
+                ctx.put("last_subject", "DRIVER");
+                ctx.put("last_driver_id", String.valueOf(driver.getId()));
+                ctx.put("last_driver_name", driver.getName());
+                ctx.put("last_driver_code", driver.getCode());
+            }
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent(intentName)
+                .message(successMsg)
+                .reportId(report.getReportId())
+                .pdfUrl(report.getPdfUrl())
+                .downloadUrl(report.getDownloadUrl())
+                .data(report.getReportData())
+                .quickActions(List.of(
+                    "📊 Fleet Summary",
+                    "🏆 Driver Rankings",
+                    "⚠️ All Open Alerts"
+                ))
+                .build();
+
+        } catch (Exception e) {
+            log.error("Error generating alert-based report", e);
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("ALERT_REPORT")
+                .message("Sorry, I encountered an error generating the alert-based report: " + e.getMessage() +
+                    "\n\nYou can generate the report directly from the **Reports** page by selecting \"Alert-Based Report\".")
+                .quickActions(List.of("📊 Fleet Summary", "⚠️ View Open Alerts", "🏆 Driver Rankings"))
+                .build();
+        }
     }
 
     private ChatResponseDTO handleDriverReportIntent(String sessionId, String normalized, String original,
@@ -2205,30 +3122,64 @@ public class ChatService {
 
     /** Resolve driver from text or session context */
     private Driver resolveDriverFromMessage(String message, Map<String, String> ctx) {
+        if (message == null || message.isBlank()) return null;
         String lower = message.toLowerCase().trim();
 
-        // 1. Direct DRV code
-        Matcher m = Pattern.compile("drv\\d+").matcher(lower);
+        // 1. Direct DRV code (e.g. DRV001, DRV008, DRV009)
+        Matcher m = Pattern.compile("\\bdrv\\d+\\b", Pattern.CASE_INSENSITIVE).matcher(lower);
         if (m.find()) {
             String code = m.group().toUpperCase();
             Optional<Driver> d = driverRepository.findByCode(code);
             if (d.isPresent()) return d.get();
         }
 
-        // 2. Name match
+        // Common stopwords that must never match as driver names
+        Set<String> blacklistedTokens = Set.of(
+            "driver", "drivers", "vehicle", "vehicles", "fleet", "alert", "alerts",
+            "report", "reports", "trip", "trips", "test", "email", "mail", "number",
+            "count", "maximum", "minimum", "highest", "lowest", "most", "fewest",
+            "best", "worst", "safest", "generated", "occurred", "today", "yesterday",
+            "september", "october", "august", "month", "year", "week", "details",
+            "summary", "show", "give", "tell", "which", "what", "find"
+        );
+
+        // 2. Name match (case-insensitive with word boundaries)
         List<Driver> all = driverRepository.findAll();
+
+        // 2a. Full name exact match (e.g. "vikram singh", "deepak joshi")
         for (Driver d : all) {
-            String[] parts = d.getName().toLowerCase().split("\\s+");
+            if (d.getName() == null) continue;
+            String dName = d.getName().trim().toLowerCase();
+            if (dName.contains("no email") || dName.contains("test") || (d.getCode() != null && d.getCode().startsWith("DRV_NO_MAIL"))) {
+                continue; // Skip dummy / test drivers
+            }
+            Pattern fullPat = Pattern.compile("\\b" + Pattern.quote(dName) + "\\b");
+            if (fullPat.matcher(lower).find()) {
+                return d;
+            }
+        }
+
+        // 2b. First/last name match with word boundaries (ignoring blacklisted tokens)
+        for (Driver d : all) {
+            if (d.getName() == null) continue;
+            String dName = d.getName().trim().toLowerCase();
+            if (dName.contains("no email") || dName.contains("test") || (d.getCode() != null && d.getCode().startsWith("DRV_NO_MAIL"))) {
+                continue;
+            }
+            String[] parts = dName.split("\\s+");
             for (String part : parts) {
-                if (part.length() >= 3 && lower.contains(part)) {
-                    return d;
+                if (part.length() >= 3 && !blacklistedTokens.contains(part)) {
+                    Pattern partPat = Pattern.compile("\\b" + Pattern.quote(part) + "\\b");
+                    if (partPat.matcher(lower).find()) {
+                        return d;
+                    }
                 }
             }
         }
 
-        // 3. Pronoun reference ("he", "him", "his", "she", "her", "the driver")
-        if (lower.matches(".*\\b(he|him|his|she|her|the driver)\\b.*") || "DRIVER".equals(ctx.get("last_subject"))) {
-            if (ctx.containsKey("last_driver_id")) {
+        // 3. Pronoun reference ONLY if an explicit pronoun is present
+        if (lower.matches(".*\\b(he|him|his|she|her)\\b.*")) {
+            if (ctx != null && ctx.containsKey("last_driver_id")) {
                 try {
                     Long id = Long.parseLong(ctx.get("last_driver_id"));
                     return driverRepository.findById(id).orElse(null);
@@ -2355,6 +3306,7 @@ public class ChatService {
                 res.getDriverCode(), res.getDriverName(),
                 res.getVehicleCode(), res.getVehicleRegistration(),
                 res.getAlertType(),
+                res.getSeverityHint(), res.getStatusHint(),
                 dateFrom, dateTo, yearMonth,
                 limit, 10.0
             );
@@ -2362,5 +3314,182 @@ public class ChatService {
             log.debug("LLM suggested intent '{}' is not recognized in local enum: {}", res.getIntent(), ex.getMessage());
             return null;
         }
+    }
+
+    private ChatResponseDTO handleSimulationQuery(String sessionId, String normalized, String originalMessage) {
+        com.gps.tracking.dto.SimulationStateDTO state = simulationService.getCurrentState();
+
+        // 1. Current Speed Query
+        if (normalized.contains("speed") && (normalized.contains("current") || normalized.contains("now") || normalized.contains("truck's speed") || normalized.contains("truck speed"))) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(String.format("🚚 **Simulated Truck Current Speed**\n\n"
+                    + "• **Vehicle:** %s (%s)\n"
+                    + "• **Current Speed:** **%.1f km/h**\n"
+                    + "• **Speed Limit:** %.1f km/h\n"
+                    + "• **Road Section:** %s\n"
+                    + "• **Status:** %s\n\n"
+                    + "ℹ️ *Data Source: Active TrackFleet Simulation Engine*",
+                    state.getVehicleRegistrationNumber(), state.getMakeModel(),
+                    state.getCurrentSpeedKmph() != null ? state.getCurrentSpeedKmph().doubleValue() : 0.0,
+                    state.getSpeedLimitKmph() != null ? state.getSpeedLimitKmph().doubleValue() : 60.0,
+                    state.getRoadName(), state.getStatus()))
+                .quickActions(List.of("📈 Distance Travelled", "⚠️ Simulation Alerts", "⚡ Max Speed"))
+                .build();
+        }
+
+        // 2. Distance Travelled Query
+        if (normalized.contains("far") || normalized.contains("distance") || normalized.contains("travelled") || normalized.contains("traveled")) {
+            long mins = state.getElapsedSeconds() / 60;
+            long secs = state.getElapsedSeconds() % 60;
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(String.format("📍 **Simulated Journey Progress**\n\n"
+                    + "• **Distance Travelled:** **%.2f km**\n"
+                    + "• **Elapsed Time:** %02d min %02d sec\n"
+                    + "• **Route:** %s (%.1f%% completed)\n"
+                    + "• **Current Location:** %s (%.4f, %.4f)\n"
+                    + "• **Destination:** %s\n\n"
+                    + "ℹ️ *Data Source: Active TrackFleet Simulation Engine*",
+                    state.getDistanceTravelledKm() != null ? state.getDistanceTravelledKm().doubleValue() : 0.0,
+                    mins, secs,
+                    state.getRouteName(), state.getProgressPercent(),
+                    state.getRoadName(),
+                    state.getLatitude() != null ? state.getLatitude().doubleValue() : 0.0,
+                    state.getLongitude() != null ? state.getLongitude().doubleValue() : 0.0,
+                    state.getDestination()))
+                .quickActions(List.of("🚚 Current Speed", "⚠️ Simulation Alerts", "💰 Simulated Penalties"))
+                .build();
+        }
+
+        // 3. Max Speed Query
+        if (normalized.contains("max") || normalized.contains("highest speed") || normalized.contains("top speed")) {
+            BigDecimal maxSpd = (state.getSummary() != null && state.getSummary().getMaxSpeedKmph() != null)
+                    ? state.getSummary().getMaxSpeedKmph()
+                    : (state.getCurrentSpeedKmph() != null ? state.getCurrentSpeedKmph() : BigDecimal.ZERO);
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(String.format("⚡ **Simulated Maximum Speed**\n\n"
+                    + "• **Maximum Speed Recorded:** **%.1f km/h**\n"
+                    + "• **Current Speed:** %.1f km/h\n"
+                    + "• **Vehicle:** %s\n"
+                    + "• **Driver:** %s\n\n"
+                    + "ℹ️ *Data Source: Active TrackFleet Simulation Engine*",
+                    maxSpd.doubleValue(),
+                    state.getCurrentSpeedKmph() != null ? state.getCurrentSpeedKmph().doubleValue() : 0.0,
+                    state.getVehicleRegistrationNumber(), state.getDriverName()))
+                .quickActions(List.of("🚚 Current Speed", "⚠️ Simulation Alerts", "📊 Journey Summary"))
+                .build();
+        }
+
+        // 4. Overspeeding alerts count
+        if (normalized.contains("overspeed") || normalized.contains("over-speed")) {
+            long overspeedCount = (state.getAllAlerts() != null) ? state.getAllAlerts().stream()
+                .filter(a -> a.getAlertType() != null && a.getAlertType().toLowerCase().contains("overspeed"))
+                .count() : 0;
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(String.format("⚠️ **Simulated Overspeeding Alerts**\n\n"
+                    + "• **Total Overspeeding Alerts:** **%d**\n"
+                    + "• **Configured Limit:** %.1f km/h\n"
+                    + "• **Status:** %s\n\n"
+                    + "ℹ️ *Data Source: Active TrackFleet Simulation Engine*",
+                    overspeedCount,
+                    state.getSpeedLimitKmph() != null ? state.getSpeedLimitKmph().doubleValue() : 60.0,
+                    state.getStatus()))
+                .quickActions(List.of("⚠️ All Simulation Alerts", "💰 Simulated Penalties", "🚚 Current Speed"))
+                .build();
+        }
+
+        // 5. Penalties Query
+        if (normalized.contains("penalt") || normalized.contains("fine")) {
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(String.format("💰 **Simulated Driver Penalties**\n\n"
+                    + "• **Driver:** %s (%s)\n"
+                    + "• **Total Cumulative Simulated Penalty:** **₹%.2f**\n"
+                    + "• **Total Alerts in Simulation:** %d\n"
+                    + "• **Note:** Progressive system generates warnings for occurrences #1 and #2 (₹0.00), and increasing fines for occurrences #3+.\n\n"
+                    + "ℹ️ *Data Source: TrackFleet Progressive Penalty Engine (Simulation Mode)*",
+                    state.getDriverName(), state.getDriverCode(),
+                    state.getTotalPenaltyAmount() != null ? state.getTotalPenaltyAmount().doubleValue() : 0.0,
+                    state.getTotalAlertsCount()))
+                .quickActions(List.of("⚠️ All Simulation Alerts", "📈 Distance Travelled", "🚚 Current Speed"))
+                .build();
+        }
+
+        // 6. Which Alerts Occurred / All alerts
+        if (normalized.contains("alert") || normalized.contains("violation")) {
+            List<com.gps.tracking.dto.AlertDTO> alerts = state.getAllAlerts();
+            if (alerts == null || alerts.isEmpty()) {
+                return ChatResponseDTO.builder()
+                    .sessionId(sessionId)
+                    .intent("SIMULATION_QUERY")
+                    .message(String.format("🛡️ **Simulation Alert Status**\n\n"
+                        + "No alerts have been generated yet in the current simulation session (%s).\n"
+                        + "The truck is driving safely at **%.1f km/h** on **%s**.\n\n"
+                        + "💡 *Tip: Use the 'Trigger Test Event' controls on the Live Simulation page to demonstrate Overspeeding or Harsh Braking alert generation.*",
+                        state.getRouteName(),
+                        state.getCurrentSpeedKmph() != null ? state.getCurrentSpeedKmph().doubleValue() : 0.0,
+                        state.getRoadName()))
+                    .quickActions(List.of("🚚 Current Speed", "📈 Distance Travelled", "⚡ Max Speed"))
+                    .build();
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("⚠️ **Alerts Occurred During Simulation (%d Total)**\n\n", alerts.size()));
+            for (int i = 0; i < Math.min(alerts.size(), 8); i++) {
+                com.gps.tracking.dto.AlertDTO a = alerts.get(i);
+                sb.append(String.format("%d. **%s** [%s]\n", i + 1, a.getAlertType(), a.getSeverity()));
+                sb.append(String.format("   • Location: %s (%.1f km/h)\n", a.getRoadName(), a.getSpeedKmph() != null ? a.getSpeedKmph().doubleValue() : 0.0));
+                if (a.getOccurrenceNumber() != null) {
+                    sb.append(String.format("   • Progressive Occurrence: #%d (%s - ₹%.2f)\n",
+                        a.getOccurrenceNumber(), a.getPenaltyClassification(), a.getPenaltyAmount() != null ? a.getPenaltyAmount().doubleValue() : 0.0));
+                }
+            }
+            if (alerts.size() > 8) {
+                sb.append(String.format("\n*...and %d more alerts in simulation log.*", alerts.size() - 8));
+            }
+            sb.append("\n\nℹ️ *Data Source: Active TrackFleet Simulation Engine*");
+
+            return ChatResponseDTO.builder()
+                .sessionId(sessionId)
+                .intent("SIMULATION_QUERY")
+                .message(sb.toString())
+                .quickActions(List.of("💰 Simulated Penalties", "🚚 Current Speed", "📊 Journey Summary"))
+                .build();
+        }
+
+        // 7. Default Simulation Overview
+        return ChatResponseDTO.builder()
+            .sessionId(sessionId)
+            .intent("SIMULATION_QUERY")
+            .message(String.format("🚚 **TrackFleet Live Simulation Status**\n\n"
+                + "• **Status:** **%s**\n"
+                + "• **Route:** %s\n"
+                + "• **Vehicle:** %s (%s)\n"
+                + "• **Driver:** %s (%s)\n"
+                + "• **Current Speed:** %.1f km/h (Limit: %.1f km/h)\n"
+                + "• **Distance Travelled:** %.2f km (%.1f%% complete)\n"
+                + "• **GPS Status:** %s\n"
+                + "• **Total Alerts:** %d (Penalties: ₹%.2f)\n\n"
+                + "ℹ️ *Data Source: Active TrackFleet Simulation Engine*",
+                state.getStatus(), state.getRouteName(),
+                state.getVehicleRegistrationNumber(), state.getMakeModel(),
+                state.getDriverName(), state.getDriverCode(),
+                state.getCurrentSpeedKmph() != null ? state.getCurrentSpeedKmph().doubleValue() : 0.0,
+                state.getSpeedLimitKmph() != null ? state.getSpeedLimitKmph().doubleValue() : 60.0,
+                state.getDistanceTravelledKm() != null ? state.getDistanceTravelledKm().doubleValue() : 0.0,
+                state.getProgressPercent(),
+                state.isGpsConnected() ? "CONNECTED 🟢" : "DISCONNECTED 🔴",
+                state.getTotalAlertsCount(),
+                state.getTotalPenaltyAmount() != null ? state.getTotalPenaltyAmount().doubleValue() : 0.0))
+            .quickActions(List.of("🚚 Current Speed", "📈 Distance Travelled", "⚠️ Simulation Alerts", "💰 Simulated Penalties"))
+            .build();
     }
 }

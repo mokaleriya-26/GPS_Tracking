@@ -32,6 +32,18 @@ public class AlertPenaltyConfig {
     @Builder.Default
     private BigDecimal defaultFineAmount = BigDecimal.ZERO;
 
+    @Column(name = "penalty_increment", nullable = false, precision = 10, scale = 2)
+    @Builder.Default
+    private BigDecimal penaltyIncrement = BigDecimal.valueOf(30.00);
+
+    @Column(name = "warning_threshold", nullable = false)
+    @Builder.Default
+    private Integer warningThreshold = 2;
+
+    @Column(name = "penalty_enabled", nullable = false)
+    @Builder.Default
+    private Boolean penaltyEnabled = true;
+
     @Column(name = "description", length = 255)
     private String description;
 

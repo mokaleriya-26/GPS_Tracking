@@ -1,31 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { getVehicles } from '../api/vehicles';
-import { getAlerts } from '../api/alerts';
+import { getAlerts, getAlertSummary } from '../api/alerts';
 
 /**
- * usePolling — fetches vehicles and alerts from the Spring Boot backend,
- * then polls at the given interval.
- *
- * Spring Boot AlertDTO fields used here:
- *   alert.alertType, alert.severity, alert.driverName, alert.vehicleRegistrationNumber,
- *   alert.occurredAt, alert.speedKmph, alert.roadName, alert.status, alert.deliveryStatus
- *
- * Spring Boot VehicleDTO fields:
- *   vehicle.id, vehicle.code, vehicle.registrationNumber, vehicle.driverName,
- *   vehicle.lastSpeedKmph, vehicle.lastLatitude, vehicle.lastLongitude, vehicle.active
+ * usePolling — fetches vehicles, alerts, and true database alert summary
+ * from the Spring Boot backend, then polls at the given interval.
  */
 export const usePolling = (intervalMs = 30000) => {
   const [vehicles, setVehicles] = useState([]);
   const [alerts, setAlerts] = useState([]);
+  const [alertSummary, setAlertSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const intervalRef = useRef(null);
 
   const fetchData = async () => {
     try {
-      const [vehiclesData, alertsData] = await Promise.all([
+      const [vehiclesData, alertsData, summaryData] = await Promise.all([
         getVehicles(),
-        getAlerts({ size: 200 })
+        getAlerts({ size: 200 }),
+        getAlertSummary().catch(() => null)
       ]);
 
       // Spring Boot returns either a Page<T> (with .content) or a plain array
@@ -39,6 +33,7 @@ export const usePolling = (intervalMs = 30000) => {
 
       setVehicles(vehicleList);
       setAlerts(alertList);
+      if (summaryData) setAlertSummary(summaryData);
       setError(null);
     } catch (err) {
       console.error('Polling error:', err);
@@ -55,5 +50,5 @@ export const usePolling = (intervalMs = 30000) => {
     return () => clearInterval(intervalRef.current);
   }, [intervalMs]);
 
-  return { vehicles, alerts, loading, error, refresh: fetchData };
+  return { vehicles, alerts, alertSummary, loading, error, refresh: fetchData };
 };

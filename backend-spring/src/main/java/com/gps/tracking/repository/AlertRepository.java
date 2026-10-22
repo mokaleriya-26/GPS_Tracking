@@ -4,15 +4,18 @@ import com.gps.tracking.entity.Alert;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface AlertRepository extends JpaRepository<Alert, Long> {
+public interface AlertRepository extends JpaRepository<Alert, Long>, JpaSpecificationExecutor<Alert> {
     Optional<Alert> findByReference(String reference);
     Page<Alert> findByOrderByOccurredAtDesc(Pageable pageable);
     Page<Alert> findByVehicleIdOrderByOccurredAtDesc(Long vehicleId, Pageable pageable);
@@ -20,6 +23,10 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     Page<Alert> findByAlertTypeOrderByOccurredAtDesc(String alertType, Pageable pageable);
     Page<Alert> findByStatusOrderByOccurredAtDesc(String status, Pageable pageable);
     Page<Alert> findBySeverityOrderByOccurredAtDesc(String severity, Pageable pageable);
+
+    List<Alert> findByTripId(Long tripId);
+    List<Alert> findByIsSimulationTrue();
+    List<Alert> findByTripIdAndIsSimulationTrue(Long tripId);
 
     List<Alert> findByDriverIdAndOccurredAtBetween(Long driverId, LocalDateTime from, LocalDateTime to);
     List<Alert> findByVehicleIdAndOccurredAtBetween(Long vehicleId, LocalDateTime from, LocalDateTime to);
@@ -61,6 +68,9 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
 
     @Query("SELECT COUNT(a) FROM Alert a WHERE a.status = 'OPEN'")
     long countOpenAlerts();
+
+    @Query("SELECT COUNT(a) FROM Alert a WHERE a.status = 'HISTORICAL'")
+    long countHistoricalAlerts();
 
     @Query("SELECT COUNT(a) FROM Alert a WHERE a.occurredAt >= :from AND a.occurredAt < :to")
     long countInDateRange(LocalDateTime from, LocalDateTime to);
@@ -120,4 +130,77 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
 
     @Query(value = "SELECT CAST(occurred_at AS DATE) as alert_date, COUNT(*) as alert_count FROM alerts GROUP BY CAST(occurred_at AS DATE) ORDER BY alert_count DESC LIMIT 1", nativeQuery = true)
     List<Object[]> findDayWithMostAlerts();
+
+    /**
+     * Parameterized Driver Alert Rankings:
+     * Directly queries PostgreSQL grouping by driver, with optional alertType, severity, and date range.
+     * Excludes dummy / test entries.
+     */
+    @Query("""
+        SELECT d.id, d.code, d.name, COUNT(a.id)
+        FROM Driver d
+        LEFT JOIN Alert a ON a.driver.id = d.id
+            AND (CAST(:alertType AS string) IS NULL OR LOWER(a.alertType) LIKE LOWER(CONCAT('%', CAST(:alertType AS string), '%')))
+            AND (CAST(:severity AS string) IS NULL OR UPPER(a.severity) = UPPER(CAST(:severity AS string)))
+            AND (CAST(:from AS timestamp) IS NULL OR a.occurredAt >= :from)
+            AND (CAST(:to AS timestamp) IS NULL OR a.occurredAt < :to)
+        WHERE d.active = true AND d.name NOT ILIKE '%no email%' AND d.name NOT ILIKE '%test%'
+        GROUP BY d.id, d.code, d.name
+        ORDER BY COUNT(a.id) DESC
+    """)
+    List<Object[]> findDriverAlertRankings(
+        @Param("alertType") String alertType,
+        @Param("severity") String severity,
+        @Param("from") LocalDateTime from,
+        @Param("to") LocalDateTime to
+    );
+
+    @Query("""
+        SELECT d.id, d.code, d.name, COUNT(a.id)
+        FROM Driver d
+        LEFT JOIN Alert a ON a.driver.id = d.id
+            AND (CAST(:alertType AS string) IS NULL OR LOWER(a.alertType) LIKE LOWER(CONCAT('%', CAST(:alertType AS string), '%')))
+            AND (CAST(:severity AS string) IS NULL OR UPPER(a.severity) = UPPER(CAST(:severity AS string)))
+            AND (CAST(:from AS timestamp) IS NULL OR a.occurredAt >= :from)
+            AND (CAST(:to AS timestamp) IS NULL OR a.occurredAt < :to)
+        WHERE d.active = true AND d.name NOT ILIKE '%no email%' AND d.name NOT ILIKE '%test%'
+        GROUP BY d.id, d.code, d.name
+        ORDER BY COUNT(a.id) ASC
+    """)
+    List<Object[]> findDriverAlertRankingsAsc(
+        @Param("alertType") String alertType,
+        @Param("severity") String severity,
+        @Param("from") LocalDateTime from,
+        @Param("to") LocalDateTime to
+    );
+
+    @Query("""
+        SELECT COUNT(a.id) FROM Alert a
+        WHERE a.driver.id = :driverId
+            AND (CAST(:alertType AS string) IS NULL OR LOWER(a.alertType) LIKE LOWER(CONCAT('%', CAST(:alertType AS string), '%')))
+            AND (CAST(:severity AS string) IS NULL OR UPPER(a.severity) = UPPER(CAST(:severity AS string)))
+            AND (CAST(:from AS timestamp) IS NULL OR a.occurredAt >= :from)
+            AND (CAST(:to AS timestamp) IS NULL OR a.occurredAt < :to)
+    """)
+    long countAlertsByDriverWithFilters(
+        @Param("driverId") Long driverId,
+        @Param("alertType") String alertType,
+        @Param("severity") String severity,
+        @Param("from") LocalDateTime from,
+        @Param("to") LocalDateTime to
+    );
+
+    @Query("""
+        SELECT COUNT(a.id) FROM Alert a
+        WHERE (CAST(:alertType AS string) IS NULL OR LOWER(a.alertType) LIKE LOWER(CONCAT('%', CAST(:alertType AS string), '%')))
+            AND (CAST(:severity AS string) IS NULL OR UPPER(a.severity) = UPPER(CAST(:severity AS string)))
+            AND (CAST(:from AS timestamp) IS NULL OR a.occurredAt >= :from)
+            AND (CAST(:to AS timestamp) IS NULL OR a.occurredAt < :to)
+    """)
+    long countAlertsWithFilters(
+        @Param("alertType") String alertType,
+        @Param("severity") String severity,
+        @Param("from") LocalDateTime from,
+        @Param("to") LocalDateTime to
+    );
 }

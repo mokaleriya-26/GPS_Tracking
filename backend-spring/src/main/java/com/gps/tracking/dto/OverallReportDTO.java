@@ -98,6 +98,12 @@ public class OverallReportDTO {
      */
     private List<AlertReportItemDTO> alertSummaries;
 
+    /** Progressive Penalty Analytics */
+    private long totalWarnings;
+    private long totalPenaltyBearingAlerts;
+    private BigDecimal totalFleetPenalties;
+    private Map<String, BigDecimal> penaltyBreakdownByAlertType;
+
     /** Flat PDF report ID + download URL */
     private String reportId;
     private String pdfUrl;
@@ -128,5 +134,8 @@ public class OverallReportDTO {
         private long ignition;
         private long fatigue;
         private long other;
+        private long warningCount;
+        private long penaltyBearingCount;
+        private BigDecimal totalPenalties;
     }
 }

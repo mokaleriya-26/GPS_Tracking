@@ -9,11 +9,13 @@ import Reports from './pages/Reports';
 import Drivers from './pages/Drivers';
 import Trips from './pages/Trips';
 import Settings from './pages/Settings';
+import LiveSimulation from './pages/LiveSimulation';
+import PenaltyManagement from './pages/PenaltyManagement';
 import ChatbotWidget from './chatbot/ChatbotWidget';
 
 function App() {
-  // Globally poll vehicles + alerts; individual pages fetch their own data
-  const { vehicles, alerts, loading } = usePolling(30000);
+  // Globally poll vehicles + alerts + alertSummary; individual pages fetch their own data
+  const { vehicles, alerts, alertSummary, loading } = usePolling(30000);
 
   if (loading && vehicles.length === 0 && alerts.length === 0) {
     return (
@@ -41,16 +43,20 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout alerts={alerts} />}>
           {/* Core pages — receive polled data */}
-          <Route index element={<Dashboard vehicles={vehicles} alerts={alerts} />} />
+          <Route index element={<Dashboard vehicles={vehicles} alerts={alerts} alertSummary={alertSummary} />} />
           <Route path="vehicles" element={<Vehicles vehicles={vehicles} />} />
 
-          {/* Self-contained pages */}
+          {/* Monitoring */}
           <Route path="alerts"      element={<Alerts />} />
+          <Route path="penalties"   element={<PenaltyManagement />} />
           <Route path="drivers"     element={<Drivers />} />
           <Route path="trips"       element={<Trips />} />
 
           {/* Reporting */}
           <Route path="reports"     element={<Reports />} />
+
+          {/* Simulation */}
+          <Route path="simulation"  element={<LiveSimulation />} />
 
           {/* System */}
           <Route path="settings"    element={<Settings />} />

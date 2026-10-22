@@ -18,6 +18,7 @@ import java.util.List;
 public class DriverController {
 
     private final DriverService driverService;
+    private final com.gps.tracking.service.PenaltyService penaltyService;
 
     @GetMapping
     @Operation(summary = "List all drivers")
@@ -31,6 +32,16 @@ public class DriverController {
     @Operation(summary = "Get driver by ID")
     public ResponseEntity<ApiResponse<DriverDTO>> getDriverById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(driverService.getDriverById(id)));
+    }
+
+    @GetMapping("/{id}/penalties")
+    @Operation(summary = "Get penalties for a specific driver with optional alert type and date range filtering")
+    public ResponseEntity<ApiResponse<List<PenaltyDTO>>> getDriverPenalties(
+            @PathVariable Long id,
+            @RequestParam(required = false) String alertType,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime to) {
+        return ResponseEntity.ok(ApiResponse.ok(penaltyService.getPenaltiesForDriverFiltered(id, alertType, from, to)));
     }
 
     @GetMapping("/code/{code}")

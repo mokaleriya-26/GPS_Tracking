@@ -21,4 +21,13 @@ public class ChatController {
         ChatResponseDTO response = chatService.processMessage(msg.getSessionId(), msg.getMessage());
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
+
+    @PostMapping("/session/clear")
+    @Operation(summary = "Clear the current chat session context")
+    public ResponseEntity<ApiResponse<Void>> clearSession(@RequestBody(required = false) ChatMessageDTO msg) {
+        if (msg != null && msg.getSessionId() != null) {
+            chatService.clearSession(msg.getSessionId());
+        }
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
 }
