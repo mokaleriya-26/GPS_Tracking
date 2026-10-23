@@ -1,6 +1,7 @@
 package com.gps.tracking.controller;
 
 import com.gps.tracking.dto.*;
+import com.gps.tracking.security.SecurityUtils;
 import com.gps.tracking.service.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,77 +21,99 @@ public class ReportController {
     private final ReportService reportService;
 
     @PostMapping("/driver/{driverId}/monthly")
-    @Operation(summary = "Generate monthly driver report PDF")
+    @Operation(summary = "Generate monthly driver report PDF (Data isolation enforced)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverMonthly(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
+        SecurityUtils.validateDriverAccess(driverId);
         req.setDriverId(driverId);
         req.setReportType("MONTHLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
     }
 
     @PostMapping("/driver/{driverId}/daily")
+    @Operation(summary = "Generate daily driver report PDF (Data isolation enforced)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverDaily(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
-        req.setDriverId(driverId); req.setReportType("DAILY");
+        SecurityUtils.validateDriverAccess(driverId);
+        req.setDriverId(driverId);
+        req.setReportType("DAILY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
     }
 
     @PostMapping("/driver/{driverId}/weekly")
+    @Operation(summary = "Generate weekly driver report PDF (Data isolation enforced)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverWeekly(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
-        req.setDriverId(driverId); req.setReportType("WEEKLY");
+        SecurityUtils.validateDriverAccess(driverId);
+        req.setDriverId(driverId);
+        req.setReportType("WEEKLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
     }
 
     @PostMapping("/driver/{driverId}/custom")
+    @Operation(summary = "Generate custom driver report PDF (Data isolation enforced)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverCustom(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
-        req.setDriverId(driverId); req.setReportType("CUSTOM");
+        SecurityUtils.validateDriverAccess(driverId);
+        req.setDriverId(driverId);
+        req.setReportType("CUSTOM");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
     }
 
     @PostMapping("/fleet/monthly")
+    @Operation(summary = "Generate fleet monthly report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetMonthly(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         req.setReportType("MONTHLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
     @PostMapping("/fleet/daily")
+    @Operation(summary = "Generate fleet daily report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetDaily(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         req.setReportType("DAILY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
     @PostMapping("/fleet/weekly")
+    @Operation(summary = "Generate fleet weekly report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetWeekly(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         req.setReportType("WEEKLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
     @PostMapping("/fleet/custom")
+    @Operation(summary = "Generate fleet custom report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetCustom(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         req.setReportType("CUSTOM");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
     @PostMapping("/fleet")
+    @Operation(summary = "Generate fleet report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleet(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetReport(req)));
     }
 
     @PostMapping(value = {"/driver/{driverId}/alert-based", "/driver/{driverId}/alert"})
-    @Operation(summary = "Generate alert-based driver report PDF")
+    @Operation(summary = "Generate alert-based driver report PDF (Data isolation enforced)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverAlertBased(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
+        SecurityUtils.validateDriverAccess(driverId);
         req.setDriverId(driverId);
         req.setReportType("ALERT_BASED");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
     }
 
     @PostMapping(value = {"/fleet/alert-based", "/fleet/alert"})
-    @Operation(summary = "Generate alert-based fleet report PDF")
+    @Operation(summary = "Generate alert-based fleet report PDF (Admin only)")
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateFleetAlertBased(
             @RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         req.setReportType("ALERT_BASED");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetAlertReport(req)));
     }
@@ -101,21 +124,20 @@ public class ReportController {
             @RequestBody ReportRequestDTO req) {
         req.setReportType("ALERT_BASED");
         if (req.getDriverId() != null || req.getDriverCode() != null) {
+            if (req.getDriverId() != null) {
+                SecurityUtils.validateDriverAccess(req.getDriverId());
+            }
             return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
         } else {
+            SecurityUtils.requireAdmin();
             return ResponseEntity.ok(ApiResponse.ok(reportService.generateFleetAlertReport(req)));
         }
     }
 
-    /**
-     * POST /api/reports/overall
-     * Generates an overall fleet summary for a given period.
-     * reportType in body: DAILY | WEEKLY | MONTHLY | CUSTOM
-     * Returns OverallReportDTO with real DB counts + PDF link.
-     */
     @PostMapping("/overall")
-    @Operation(summary = "Generate overall fleet report (vehicle entry/exit, alerts, driver breakdown)")
+    @Operation(summary = "Generate overall fleet report (Admin only)")
     public ResponseEntity<ApiResponse<OverallReportDTO>> generateOverall(@RequestBody ReportRequestDTO req) {
+        SecurityUtils.requireAdmin();
         OverallReportDTO result = reportService.generateOverallReport(req);
         return ResponseEntity.ok(ApiResponse.ok(result));
     }

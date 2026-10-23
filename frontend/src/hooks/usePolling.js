@@ -6,11 +6,11 @@ import { getAlerts, getAlertSummary } from '../api/alerts';
  * usePolling — fetches vehicles, alerts, and true database alert summary
  * from the Spring Boot backend, then polls at the given interval.
  */
-export const usePolling = (intervalMs = 30000) => {
+export const usePolling = (intervalMs = 30000, enabled = true) => {
   const [vehicles, setVehicles] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [alertSummary, setAlertSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState(null);
   const intervalRef = useRef(null);
 
@@ -45,10 +45,14 @@ export const usePolling = (intervalMs = 30000) => {
   };
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     fetchData();
     intervalRef.current = setInterval(fetchData, intervalMs);
     return () => clearInterval(intervalRef.current);
-  }, [intervalMs]);
+  }, [intervalMs, enabled]);
 
   return { vehicles, alerts, alertSummary, loading, error, refresh: fetchData };
 };

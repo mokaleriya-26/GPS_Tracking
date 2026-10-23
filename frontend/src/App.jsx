@@ -1,6 +1,11 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { AlertToastProvider } from './context/AlertToastContext';
+import AlertToastContainer from './components/AlertToastContainer';
 import { usePolling } from './hooks/usePolling';
+
+// Admin layout & pages
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Vehicles from './pages/Vehicles';
@@ -13,58 +18,130 @@ import LiveSimulation from './pages/LiveSimulation';
 import PenaltyManagement from './pages/PenaltyManagement';
 import ChatbotWidget from './chatbot/ChatbotWidget';
 
-function App() {
-  // Globally poll vehicles + alerts + alertSummary; individual pages fetch their own data
-  const { vehicles, alerts, alertSummary, loading } = usePolling(30000);
+// Auth page
+import Login from './pages/Login';
 
-  if (loading && vehicles.length === 0 && alerts.length === 0) {
-    return (
-      <div style={{
-        display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0f172a, #1e3a5f)',
-        flexDirection: 'column', gap: 16
-      }}>
-        <div style={{
-          width: 48, height: 48, borderRadius: '50%',
-          border: '4px solid rgba(37,99,235,0.3)',
-          borderTopColor: '#2563eb',
-          animation: 'spin 0.8s linear infinite'
-        }} />
-        <p style={{ color: '#94a3b8', fontSize: 14, fontFamily: 'Inter, sans-serif' }}>
-          Connecting to TrackFleet…
-        </p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
+// Driver layout & pages
+import DriverLayout from './components/DriverLayout';
+import DriverDashboard from './pages/driver/DriverDashboard';
+import DriverProfile from './pages/driver/DriverProfile';
+import DriverVehicles from './pages/driver/DriverVehicles';
+import DriverAlerts from './pages/driver/DriverAlerts';
+import DriverPenalties from './pages/driver/DriverPenalties';
+import DriverTrips from './pages/driver/DriverTrips';
+import DriverReports from './pages/driver/DriverReports';
+
+// Protected Route Guard for Admin
+function AdminRoute({ children }) {
+  const { isAuthenticated, isAdmin, isDriver } = useAuth();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
   }
+  if (isDriver) {
+    return <Navigate to="/driver/dashboard" replace />;
+  }
+  return children;
+}
+
+// Protected Route Guard for Driver
+function DriverRoute({ children }) {
+  const { isAuthenticated, isDriver } = useAuth();
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  if (!isDriver) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
+}
+
+// Public Route Guard for Login
+function PublicLoginRoute() {
+  const { isAuthenticated, isAdmin, isDriver } = useAuth();
+
+  if (isAuthenticated) {
+    if (isDriver) {
+      return <Navigate to="/driver/dashboard" replace />;
+    }
+    return <Navigate to="/" replace />;
+  }
+  return <Login />;
+}
+
+// App Content with Polling and Routes
+function AppContent() {
+  const { isAuthenticated, isAdmin } = useAuth();
+  // Only poll fleet-wide vehicles & alerts when logged in as an ADMIN
+  const { vehicles, alerts, alertSummary, loading } = usePolling(30000, isAuthenticated && isAdmin);
 
   return (
-    <BrowserRouter>
+    <>
+      {/* Real-time alert pop-ups (toasts) across the application */}
+      <AlertToastContainer />
+
       <Routes>
-        <Route path="/" element={<Layout alerts={alerts} />}>
-          {/* Core pages — receive polled data */}
+        {/* Public Login Route */}
+        <Route path="/login" element={<PublicLoginRoute />} />
+
+        {/* Driver Portal Routes */}
+        <Route
+          path="/driver"
+          element={
+            <DriverRoute>
+              <DriverLayout />
+            </DriverRoute>
+          }
+        >
+          <Route index element={<Navigate to="/driver/dashboard" replace />} />
+          <Route path="dashboard" element={<DriverDashboard />} />
+          <Route path="profile" element={<DriverProfile />} />
+          <Route path="vehicles" element={<DriverVehicles />} />
+          <Route path="alerts" element={<DriverAlerts />} />
+          <Route path="penalties" element={<DriverPenalties />} />
+          <Route path="trips" element={<DriverTrips />} />
+          <Route path="reports" element={<DriverReports />} />
+        </Route>
+
+        {/* Admin Fleet Management Routes */}
+        <Route
+          path="/"
+          element={
+            <AdminRoute>
+              <Layout alerts={alerts} />
+            </AdminRoute>
+          }
+        >
           <Route index element={<Dashboard vehicles={vehicles} alerts={alerts} alertSummary={alertSummary} />} />
           <Route path="vehicles" element={<Vehicles vehicles={vehicles} />} />
-
-          {/* Monitoring */}
-          <Route path="alerts"      element={<Alerts />} />
-          <Route path="penalties"   element={<PenaltyManagement />} />
-          <Route path="drivers"     element={<Drivers />} />
-          <Route path="trips"       element={<Trips />} />
-
-          {/* Reporting */}
-          <Route path="reports"     element={<Reports />} />
-
-          {/* Simulation */}
-          <Route path="simulation"  element={<LiveSimulation />} />
-
-          {/* System */}
-          <Route path="settings"    element={<Settings />} />
+          <Route path="alerts" element={<Alerts />} />
+          <Route path="penalties" element={<PenaltyManagement />} />
+          <Route path="drivers" element={<Drivers />} />
+          <Route path="trips" element={<Trips />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="simulation" element={<LiveSimulation />} />
+          <Route path="settings" element={<Settings />} />
         </Route>
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
 
-      {/* Global chatbot widget — appears on all pages */}
-      <ChatbotWidget />
+      {/* Admin Assistant Chatbot */}
+      {isAdmin && <ChatbotWidget />}
+    </>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AlertToastProvider>
+          <AppContent />
+        </AlertToastProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

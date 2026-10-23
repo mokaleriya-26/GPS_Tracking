@@ -93,6 +93,7 @@ td {
 .text-truncate-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -161,5 +162,66 @@ td {
   .chatbot-trigger {
     right: 12px;
     bottom: 16px;
+  }
+}
+
+/* ============================================================
+   PRINT STYLES (A4 Layout, Clean Reports, Hide Navigation)
+   ============================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm 12mm 14mm 12mm;
+  }
+
+  /* Hide navigation, sidebar, navbar, chatbot, toasts, and buttons */
+  aside,
+  nav,
+  .navbar,
+  .sidebar,
+  .btn,
+  button,
+  .no-print,
+  #chatbot-widget,
+  .chatbot-window,
+  .chatbot-trigger,
+  .alert-toast-container,
+  .d-print-none {
+    display: none !important;
+  }
+
+  body, html, #root, .app-main {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    font-size: 11pt !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .printable-report-area, .report-print-container {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Prevent awkward page splits */
+  .card, .table, tr, .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  h1, h2, h3, h4, h5, .print-avoid-after {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    color: #0f172a !important;
   }
 }

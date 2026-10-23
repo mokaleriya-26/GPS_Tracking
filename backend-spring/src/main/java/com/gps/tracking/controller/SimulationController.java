@@ -39,6 +39,7 @@ public class SimulationController {
     @PostMapping("/start")
     @Operation(summary = "Start or restart a truck simulation journey")
     public ResponseEntity<SimulationStateDTO> startSimulation(@RequestBody(required = false) Map<String, Object> payload) {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         String routeId = "mumbai-pune-expressway";
         Integer multiplier = 1;
 
@@ -58,36 +59,42 @@ public class SimulationController {
     @PostMapping("/pause")
     @Operation(summary = "Pause the running simulation")
     public ResponseEntity<SimulationStateDTO> pauseSimulation() {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.pauseSimulation());
     }
 
     @PostMapping("/resume")
     @Operation(summary = "Resume the paused simulation")
     public ResponseEntity<SimulationStateDTO> resumeSimulation() {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.resumeSimulation());
     }
 
     @PostMapping("/stop")
     @Operation(summary = "Stop the simulation and record final status")
     public ResponseEntity<SimulationStateDTO> stopSimulation() {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.stopSimulation());
     }
 
     @PostMapping("/reset")
     @Operation(summary = "Reset simulation and safely clear simulated trip records")
     public ResponseEntity<SimulationStateDTO> resetSimulation() {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.resetSimulation());
     }
 
     @PostMapping("/step")
     @Operation(summary = "Execute one telemetry step along the route and evaluate alert rules")
     public ResponseEntity<SimulationStateDTO> stepSimulation() {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.stepSimulation());
     }
 
     @PostMapping("/trigger-event")
     @Operation(summary = "Trigger a manual event scenario (Overspeeding, Harsh Braking, Harsh Acceleration, GPS Disconnect, Normal)")
     public ResponseEntity<SimulationStateDTO> triggerEvent(@RequestBody SimulationEventRequestDTO req) {
+        com.gps.tracking.security.SecurityUtils.requireAdmin();
         return ResponseEntity.ok(simulationService.triggerEvent(req.getEventType(), req.getOverrideSpeedKmph(), req.getEventId()));
     }
 

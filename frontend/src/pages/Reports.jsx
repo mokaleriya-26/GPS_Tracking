@@ -4,8 +4,9 @@ import {
   SlidersHorizontal, Download, ExternalLink, FileText,
   Users, Loader, CheckCircle, AlertCircle, Globe, User,
   ArrowRight, AlertTriangle, ShieldCheck, Clock, MapPin, Gauge, Filter,
-  RefreshCw, CheckSquare, Square
+  RefreshCw, CheckSquare, Square, Share2, Printer, Check
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { getDrivers } from '../api/drivers';
 import { getVehicles } from '../api/vehicles';
 import api from '../api/axios';
@@ -125,6 +126,8 @@ function getWeekRange(weekStr) {
 }
 
 export default function Reports() {
+  const { user, isDriver } = useAuth();
+  const [shareToast, setShareToast]             = useState(null);
   const [drivers, setDrivers]                   = useState([]);
   const [vehicles, setVehicles]                 = useState([]);
   const [periodType, setPeriodType]             = useState('monthly');
@@ -158,13 +161,25 @@ export default function Reports() {
   const [alertTypeFilter, setAlertTypeFilter] = useState('ALL');
 
   useEffect(() => {
-    getDrivers()
-      .then(data => {
-        const list = Array.isArray(data) ? data : (data?.content || []);
-        setDrivers(list);
-        if (list.length > 0) setSelectedDriverId(String(list[0].id));
-      })
-      .catch(() => setError('Could not load drivers. Backend may be starting up.'));
+    if (isDriver && user?.driverId) {
+      setReportScope('driver');
+      setSelectedDriverId(String(user.driverId));
+      getDrivers()
+        .then(data => {
+          const list = Array.isArray(data) ? data : (data?.content || []);
+          const selfList = list.filter(d => String(d.id) === String(user.driverId));
+          setDrivers(selfList.length > 0 ? selfList : [{ id: user.driverId, name: user.driverName, code: user.driverCode }]);
+        })
+        .catch(() => {});
+    } else {
+      getDrivers()
+        .then(data => {
+          const list = Array.isArray(data) ? data : (data?.content || []);
+          setDrivers(list);
+          if (list.length > 0) setSelectedDriverId(String(list[0].id));
+        })
+        .catch(() => setError('Could not load drivers. Backend may be starting up.'));
+    }
 
     getVehicles()
       .then(data => {
@@ -172,9 +187,9 @@ export default function Reports() {
         setVehicles(list);
       })
       .catch(() => {});
-  }, []);
+  }, [isDriver, user?.driverId, user?.driverName, user?.driverCode]);
 
-  const isOverallReport = reportScope === 'overall';
+  const isOverallReport = !isDriver && reportScope === 'overall';
   const weekRange = getWeekRange(week);
 
   const handlePresetSelect = (presetKey) => {
@@ -331,6 +346,47 @@ export default function Reports() {
   const fullDownloadUrl = result?.downloadUrl  ? `${BASE}${result.downloadUrl}` : null;
   const reportData = result;
 
+  const handleShareReport = async () => {
+    if (!result) return;
+    const rep = reportData || result;
+    const title = rep?.title || (isOverallReport ? 'Fleet Performance Report' : `${rep?.driverName || 'Driver'} Report`);
+    const dateStr = `${rep?.startDate || ''} to ${rep?.endDate || ''}`;
+    const driverStr = rep?.driverName ? `Driver: ${rep.driverName} (${rep.driverCode || ''})` : 'Fleet Wide';
+    const summaryText = `TrackFleet Report: ${title}\nPeriod: ${dateStr}\n${driverStr}\nTotal Distance: ${rep?.totalDistanceKm != null ? rep.totalDistanceKm + ' km' : '—'}\nTotal Alerts: ${rep?.totalAlerts || '0'}\nTotal Penalties: ₹${rep?.totalPenaltyAmount || '0.00'}`;
+
+    const shareUrl = fullPdfUrl || fullDownloadUrl || window.location.href;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title,
+          text: summaryText,
+          url: shareUrl,
+        });
+        return;
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.warn('Web Share API error, using clipboard fallback', err);
+        } else {
+          return;
+        }
+      }
+    }
+
+    try {
+      const textToCopy = `${summaryText}\n\nReport Link: ${shareUrl}`;
+      await navigator.clipboard.writeText(textToCopy);
+      setShareToast('Report summary and link copied to clipboard!');
+      setTimeout(() => setShareToast(null), 4000);
+    } catch {
+      alert(`Report Link:\n${shareUrl}`);
+    }
+  };
+
+  const handlePrintReport = () => {
+    window.print();
+  };
+
   // Filter alerts for preview in standard reports
   const allAlertSummaries = reportData?.alertSummaries || [];
   const allAlertEvents    = reportData?.alertEvents    || [];
@@ -399,7 +455,7 @@ export default function Reports() {
                 <div className="d-flex gap-2">
                   {[
                     { val: 'driver',  label: 'Driver Report',  icon: <User size={13}/> },
-                    { val: 'overall', label: 'Fleet Overview', icon: <Globe size={13}/> },
+                    ...(!isDriver ? [{ val: 'overall', label: 'Fleet Overview', icon: <Globe size={13}/> }] : []),
                   ].map(s => (
                     <button key={s.val}
                       onClick={() => { setReportScope(s.val); setResult(null); setError(null); }}
@@ -651,7 +707,7 @@ export default function Reports() {
         {/* ===== REPORT VIEW & TABS ===== */}
         <div className="col-12 col-lg-8" style={{ minWidth: 0 }}>
           {result ? (
-            <div className="card border-0 shadow-sm" style={{ borderRadius: 14 }}>
+            <div className="card border-0 shadow-sm printable-report-area" style={{ borderRadius: 14 }}>
               <div className="card-body p-4">
                 {/* Header Actions */}
                 <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 pb-3 border-bottom">
@@ -669,7 +725,25 @@ export default function Reports() {
                       {reportData?.statusFilter && reportData.statusFilter !== 'All' && ` · Status: ${reportData.statusFilter}`}
                     </div>
                   </div>
-                  <div className="d-flex gap-2">
+                  <div className="d-flex gap-2 flex-wrap d-print-none">
+                    <button
+                      id="btn-share-report"
+                      className="btn btn-outline-success btn-sm d-flex align-items-center gap-1"
+                      style={{ borderRadius: 7 }}
+                      onClick={handleShareReport}
+                      title="Share report summary or native share"
+                    >
+                      <Share2 size={13} /> Share
+                    </button>
+                    <button
+                      id="btn-print-report"
+                      className="btn btn-outline-dark btn-sm d-flex align-items-center gap-1"
+                      style={{ borderRadius: 7 }}
+                      onClick={handlePrintReport}
+                      title="Print A4 report"
+                    >
+                      <Printer size={13} /> Print
+                    </button>
                     {fullPdfUrl && (
                       <a href={fullPdfUrl} target="_blank" rel="noreferrer" className="btn btn-outline-primary btn-sm d-flex align-items-center gap-1" style={{ borderRadius: 7 }}>
                         <ExternalLink size={13} /> Open in Browser
@@ -686,6 +760,12 @@ export default function Reports() {
                     </button>
                   </div>
                 </div>
+
+                {shareToast && (
+                  <div className="alert alert-success py-2 px-3 mb-3 d-flex align-items-center gap-2 d-print-none" style={{ fontSize: 13, borderRadius: 8 }}>
+                    <Check size={16} /> {shareToast}
+                  </div>
+                )}
 
                 {/* ============================================================ */}
                 {/* SUB-TABS: ALERT-BASED REPORT                                 */}

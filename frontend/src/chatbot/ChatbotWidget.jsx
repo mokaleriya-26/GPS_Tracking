@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   MessageCircle, X, Send, Bot, User, FileText, Download,
   ExternalLink, RefreshCw, Zap, Mic, MicOff, AlertCircle, ChevronRight,
-  Volume2, VolumeX, Square, RotateCcw
+  Volume2, VolumeX, Square, RotateCcw, Sliders, Play
 } from 'lucide-react';
 import { sendChatMessage, clearSession } from '../api/chat';
 import { useSpeechRecognition } from './useSpeechRecognition';
@@ -206,15 +206,27 @@ export default function ChatbotWidget() {
   const inputRef   = useRef(null);
   const suggTimer  = useRef(null);
 
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+
   // ── Speech synthesis (Voice output) ──────────────────────────────────────
   const {
     isSupported: isTtsSupported,
     isSpeaking,
     voiceEnabled,
     setVoiceEnabled,
+    voices,
+    selectedVoiceURI,
+    setSelectedVoiceURI,
+    pitch,
+    setPitch,
+    rate,
+    setRate,
+    resetVoiceDefaults,
+    currentVoice,
     speak,
     stop: stopSpeaking,
     replay: replaySpeech,
+    testVoice,
   } = useSpeechSynthesis();
 
   // ── Voice hook (Speech input) ─────────────────────────────────────────────
@@ -428,6 +440,23 @@ export default function ChatbotWidget() {
               </button>
             )}
 
+            {/* Voice Settings Button */}
+            {isTtsSupported && (
+              <button
+                id="chatbot-voice-settings-btn"
+                onClick={() => setShowVoiceSettings(s => !s)}
+                title="Change Voice & Speech Settings"
+                style={{
+                  background: showVoiceSettings ? '#2563eb' : 'rgba(255,255,255,0.15)',
+                  border: 'none', color: '#fff',
+                  cursor: 'pointer', padding: '4px 7px', fontSize: 11, borderRadius: 6,
+                  display: 'flex', alignItems: 'center', gap: 3, transition: 'all .2s'
+                }}
+              >
+                <Sliders size={13} color={showVoiceSettings ? '#fbbf24' : '#fff'} />
+              </button>
+            )}
+
             {/* Stop ongoing speech button */}
             {isSpeaking && (
               <button
@@ -457,6 +486,113 @@ export default function ChatbotWidget() {
               <X size={17} />
             </button>
           </div>
+
+          {/* ── Voice Customization Panel ── */}
+          {showVoiceSettings && isTtsSupported && (
+            <div style={{
+              background: '#0f172a', borderBottom: '1px solid #1e293b',
+              padding: '12px 14px', color: '#e2e8f0', fontSize: 12, flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, color: '#93c5fd', fontSize: 12 }}>
+                  <Sliders size={13} color="#60a5fa" />
+                  Voice Customization
+                </div>
+                <button
+                  onClick={() => setShowVoiceSettings(false)}
+                  style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 2 }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {/* Voice dropdown */}
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Selected Voice</span>
+                  {currentVoice && (
+                    <span style={{ fontSize: 10, color: '#38bdf8' }}>{currentVoice.lang}</span>
+                  )}
+                </div>
+                <select
+                  value={selectedVoiceURI}
+                  onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                  style={{
+                    width: '100%', background: '#1e293b', color: '#f8fafc',
+                    border: '1px solid #334155', borderRadius: 6,
+                    padding: '6px 8px', fontSize: 11, outline: 'none'
+                  }}
+                >
+                  <option value="">✨ Default ({currentVoice?.name || 'Auto Natural Voice'})</option>
+                  {voices.map((v) => (
+                    <option key={v.voiceURI || v.name} value={v.voiceURI || v.name}>
+                      {v.name} ({v.lang})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Pitch & Speed sliders in 2 columns */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>Speed</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>{Number(rate).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.75"
+                    max="1.35"
+                    step="0.05"
+                    value={rate}
+                    onChange={(e) => setRate(parseFloat(e.target.value))}
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>Pitch</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>{Number(pitch).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.75"
+                    max="1.35"
+                    step="0.05"
+                    value={pitch}
+                    onChange={(e) => setPitch(parseFloat(e.target.value))}
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons: Test voice + Reset */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => testVoice("Hello! I am your Fleet Assistant. How can I help you today?")}
+                  style={{
+                    flex: 1, background: '#2563eb', color: '#fff', border: 'none',
+                    borderRadius: 6, padding: '5px 8px', fontSize: 11, fontWeight: 600,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4
+                  }}
+                >
+                  <Play size={11} fill="#fff" /> Test Voice
+                </button>
+                <button
+                  type="button"
+                  onClick={resetVoiceDefaults}
+                  style={{
+                    background: '#334155', color: '#cbd5e1', border: 'none',
+                    borderRadius: 6, padding: '5px 10px', fontSize: 11,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* ── Speaking indicator banner ── */}
           {isSpeaking && (

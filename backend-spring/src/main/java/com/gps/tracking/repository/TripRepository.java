@@ -45,6 +45,9 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
     @Query("SELECT DISTINCT t.vehicle FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to")
     List<Vehicle> findDistinctVehiclesByDriverIdAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
+    @Query("SELECT DISTINCT t.vehicle FROM Trip t WHERE t.driver.id = :driverId AND t.vehicle IS NOT NULL")
+    List<Vehicle> findDistinctVehiclesByDriverId(Long driverId);
+
     @Query("SELECT t.vehicle.registrationNumber, COUNT(t), COALESCE(SUM(t.distanceKm), 0), t.vehicle.id " +
            "FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to " +
            "GROUP BY t.vehicle.registrationNumber, t.vehicle.id ORDER BY COUNT(t) DESC")

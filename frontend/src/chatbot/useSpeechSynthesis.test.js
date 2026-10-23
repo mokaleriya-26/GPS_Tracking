@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { stripMarkdownAndFormatForSpeech } from './useSpeechSynthesis.js';
+import { stripMarkdownAndFormatForSpeech, getBestDefaultVoice } from './useSpeechSynthesis.js';
 
 console.log('Testing stripMarkdownAndFormatForSpeech...');
 
@@ -36,4 +36,17 @@ assert.strictEqual(stripMarkdownAndFormatForSpeech(''), '');
 assert.strictEqual(stripMarkdownAndFormatForSpeech(null), '');
 assert.strictEqual(stripMarkdownAndFormatForSpeech(undefined), '');
 
-console.log('All speech formatting assertions passed successfully!');
+console.log('Testing getBestDefaultVoice...');
+const mockVoices = [
+  { name: 'Alex', lang: 'en-US', voiceURI: 'alex' },
+  { name: 'Samantha', lang: 'en-US', voiceURI: 'samantha' },
+  { name: 'Rishi', lang: 'en-IN', voiceURI: 'rishi' },
+];
+const chosen = getBestDefaultVoice(mockVoices);
+assert.strictEqual(chosen.name, 'Samantha', 'Samantha should be picked as preferred clear voice');
+
+assert.strictEqual(getBestDefaultVoice([]), null);
+assert.strictEqual(getBestDefaultVoice(null), null);
+
+console.log('All speech formatting and voice selection assertions passed successfully!');
+

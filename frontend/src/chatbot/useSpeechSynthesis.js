@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const STORAGE_KEY = 'trackfleet_voice_enabled';
+const STORAGE_VOICE_URI_KEY = 'trackfleet_voice_uri';
+const STORAGE_VOICE_PITCH_KEY = 'trackfleet_voice_pitch';
+const STORAGE_VOICE_RATE_KEY = 'trackfleet_voice_rate';
 
 /**
  * Clean markdown, links, emojis, and convert tables into spoken natural English sentences.
@@ -88,6 +91,53 @@ export function stripMarkdownAndFormatForSpeech(text) {
 }
 
 /**
+ * Pick the best natural, clear, pleasant sounding default voice.
+ * Prioritizes high quality voices like Samantha, Google Natural, Karen, Victoria, Daniel, etc.
+ * over robotic/monotone fallback voices.
+ */
+export function getBestDefaultVoice(voices) {
+  if (!voices || voices.length === 0) return null;
+
+  // 1. High priority natural / pleasant sounding English voices
+  const preferredNames = [
+    'samantha',
+    'google uk english female',
+    'google us english',
+    'victoria',
+    'karen',
+    'serena',
+    'moira',
+    'fiona',
+    'tessa',
+    'daniel',
+    'alex',
+  ];
+
+  for (const name of preferredNames) {
+    const match = voices.find(v => v.name && v.name.toLowerCase().includes(name));
+    if (match) return match;
+  }
+
+  // 2. High-quality natural / neural / enhanced English voices
+  const naturalMatch = voices.find(v =>
+    v.lang && v.lang.startsWith('en') &&
+    /(natural|neural|enhanced|premium)/i.test(v.name)
+  );
+  if (naturalMatch) return naturalMatch;
+
+  // 3. Clear en-US or en-GB voices
+  const standardEn = voices.find(v => v.lang === 'en-US' || v.lang === 'en-GB');
+  if (standardEn) return standardEn;
+
+  // 4. Any English voice
+  const anyEn = voices.find(v => v.lang && v.lang.startsWith('en'));
+  if (anyEn) return anyEn;
+
+  // 5. Fallback
+  return voices[0];
+}
+
+/**
  * useSpeechSynthesis — Built-in Web Speech API SpeechSynthesis hook.
  */
 export function useSpeechSynthesis() {
@@ -99,6 +149,23 @@ export function useSpeechSynthesis() {
     if (typeof window === 'undefined') return true;
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved !== null ? saved === 'true' : true;
+  });
+
+  const [selectedVoiceURI, setSelectedVoiceURIState] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    return localStorage.getItem(STORAGE_VOICE_URI_KEY) || '';
+  });
+
+  const [pitch, setPitchState] = useState(() => {
+    if (typeof window === 'undefined') return 1.0;
+    const p = parseFloat(localStorage.getItem(STORAGE_VOICE_PITCH_KEY));
+    return !isNaN(p) && p >= 0.5 && p <= 2.0 ? p : 1.0;
+  });
+
+  const [rate, setRateState] = useState(() => {
+    if (typeof window === 'undefined') return 1.0;
+    const r = parseFloat(localStorage.getItem(STORAGE_VOICE_RATE_KEY));
+    return !isNaN(r) && r >= 0.5 && r <= 2.0 ? r : 1.0;
   });
 
   const utteranceRef = useRef(null);
@@ -143,6 +210,40 @@ export function useSpeechSynthesis() {
     }
   }, [voiceEnabled, isSupported]);
 
+  // Persist selected voice URI
+  const setSelectedVoiceURI = useCallback((uri) => {
+    setSelectedVoiceURIState(uri || '');
+    try {
+      if (uri) localStorage.setItem(STORAGE_VOICE_URI_KEY, uri);
+      else localStorage.removeItem(STORAGE_VOICE_URI_KEY);
+    } catch (_) {}
+  }, []);
+
+  // Persist pitch
+  const setPitch = useCallback((p) => {
+    const val = Number(p);
+    setPitchState(val);
+    try {
+      localStorage.setItem(STORAGE_VOICE_PITCH_KEY, String(val));
+    } catch (_) {}
+  }, []);
+
+  // Persist rate/speed
+  const setRate = useCallback((r) => {
+    const val = Number(r);
+    setRateState(val);
+    try {
+      localStorage.setItem(STORAGE_VOICE_RATE_KEY, String(val));
+    } catch (_) {}
+  }, []);
+
+  // Reset to default voice & speed
+  const resetVoiceDefaults = useCallback(() => {
+    setSelectedVoiceURI('');
+    setPitch(1.0);
+    setRate(1.0);
+  }, [setSelectedVoiceURI, setPitch, setRate]);
+
   // Stop speech immediately
   const stop = useCallback(() => {
     if (!isSupported) return;
@@ -153,8 +254,8 @@ export function useSpeechSynthesis() {
     utteranceRef.current = null;
   }, [isSupported]);
 
-  // Internal speak function
-  const speakText = useCallback((text, force = false) => {
+  // Internal speak function with support for voice, pitch, and rate
+  const speakText = useCallback((text, force = false, options = {}) => {
     if (!isSupported) return;
     if (!force && !voiceEnabled) return;
 
@@ -169,16 +270,23 @@ export function useSpeechSynthesis() {
     const utterance = new SpeechSynthesisUtterance(cleaned);
     utteranceRef.current = utterance;
 
-    // Pick suitable voice: prefer en-IN, en-GB, en-US, or default
+    // Pick user-chosen voice or best natural default voice
+    let activeVoice = null;
+    const targetURI = options.voiceURI !== undefined ? options.voiceURI : selectedVoiceURI;
     if (voices.length > 0) {
-      const preferred = voices.find(v => v.lang === 'en-IN')
-        || voices.find(v => v.lang.startsWith('en'))
-        || voices[0];
-      if (preferred) utterance.voice = preferred;
+      if (targetURI) {
+        activeVoice = voices.find(v => v.voiceURI === targetURI || v.name === targetURI);
+      }
+      if (!activeVoice) {
+        activeVoice = getBestDefaultVoice(voices);
+      }
+      if (activeVoice) {
+        utterance.voice = activeVoice;
+      }
     }
 
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    utterance.rate = options.rate !== undefined ? options.rate : rate;
+    utterance.pitch = options.pitch !== undefined ? options.pitch : pitch;
 
     utterance.onstart = () => {
       setIsSpeaking(true);
@@ -204,20 +312,40 @@ export function useSpeechSynthesis() {
       console.warn('Failed to speak:', e);
       setIsSpeaking(false);
     }
-  }, [isSupported, voiceEnabled, voices]);
+  }, [isSupported, voiceEnabled, voices, selectedVoiceURI, pitch, rate]);
 
   // Replay speaks text even if automatic speech is muted
   const replay = useCallback((text) => {
     speakText(text, true);
   }, [speakText]);
 
+  // Test current or specified voice settings
+  const testVoice = useCallback((customText, testOpts = {}) => {
+    const sample = customText || "Hello! I am your fleet assistant. This is how my voice sounds.";
+    speakText(sample, true, testOpts);
+  }, [speakText]);
+
+  const currentVoice = (voices.length > 0 && selectedVoiceURI)
+    ? (voices.find(v => v.voiceURI === selectedVoiceURI || v.name === selectedVoiceURI) || getBestDefaultVoice(voices))
+    : getBestDefaultVoice(voices);
+
   return {
     isSupported,
     isSpeaking,
     voiceEnabled,
     setVoiceEnabled,
+    voices,
+    selectedVoiceURI,
+    setSelectedVoiceURI,
+    pitch,
+    setPitch,
+    rate,
+    setRate,
+    resetVoiceDefaults,
+    currentVoice,
     speak: speakText,
     stop,
     replay,
+    testVoice,
   };
 }

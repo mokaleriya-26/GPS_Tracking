@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import L from 'leaflet';
 import simulationApi from '../api/simulation';
+import { useAlertToast } from '../context/AlertToastContext';
 
 // Helper for formatted time
 const formatTime = (seconds) => {
@@ -81,6 +82,8 @@ const createFlagIcon = (isOrigin, label) => {
 };
 
 const LiveSimulation = () => {
+  const { triggerAlertToast } = useAlertToast();
+
   // Routes & Selection
   const [routes, setRoutes] = useState([]);
   const [selectedRouteId, setSelectedRouteId] = useState('mumbai-pune-expressway');
@@ -295,6 +298,9 @@ const LiveSimulation = () => {
     try {
       const updated = await simulationApi.stepSimulation();
       setSimState(updated);
+      if (updated?.allAlerts && updated.allAlerts.length > 0) {
+        updated.allAlerts.forEach((a) => triggerAlertToast(a));
+      }
       if (updated.status === 'COMPLETED') {
         if (updated.summary) {
           setFinalSummary(updated.summary);
@@ -304,7 +310,7 @@ const LiveSimulation = () => {
     } catch (err) {
       console.error('Simulation step error:', err);
     }
-  }, []);
+  }, [triggerAlertToast]);
 
   // Interval loop based on speedMultiplier
   useEffect(() => {
@@ -389,6 +395,9 @@ const LiveSimulation = () => {
       const eventId = 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
       const res = await simulationApi.triggerEvent(eventType, null, eventId);
       setSimState(res);
+      if (res?.allAlerts && res.allAlerts.length > 0) {
+        res.allAlerts.forEach((a) => triggerAlertToast(a));
+      }
     } catch (err) {
       setError('Failed to trigger event: ' + err.message);
     }
