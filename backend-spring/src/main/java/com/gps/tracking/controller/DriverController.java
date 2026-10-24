@@ -27,13 +27,14 @@ public class DriverController {
     @GetMapping
     @Operation(summary = "List all drivers (Admin: all drivers; Driver: only authenticated driver)")
     public ResponseEntity<ApiResponse<List<DriverDTO>>> getAllDrivers(
-            @RequestParam(required = false) Boolean active) {
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(required = false, defaultValue = "false") Boolean includeTests) {
         if (SecurityUtils.isDriver()) {
             Long driverId = SecurityUtils.getCurrentDriverId();
             DriverDTO self = driverService.getDriverById(driverId);
             return ResponseEntity.ok(ApiResponse.ok(Collections.singletonList(self)));
         }
-        List<DriverDTO> drivers = active != null && active ? driverService.getActiveDrivers() : driverService.getAllDrivers();
+        List<DriverDTO> drivers = driverService.getAllDrivers(active, includeTests);
         return ResponseEntity.ok(ApiResponse.ok(drivers));
     }
 
@@ -93,5 +94,13 @@ public class DriverController {
     public ResponseEntity<ApiResponse<DriverDTO>> updateDriver(@PathVariable Long id, @RequestBody DriverDTO dto) {
         SecurityUtils.requireAdmin();
         return ResponseEntity.ok(ApiResponse.ok(driverService.updateDriver(id, dto), "Driver updated"));
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete driver (Admin only)")
+    public ResponseEntity<ApiResponse<String>> deleteDriver(@PathVariable Long id) {
+        SecurityUtils.requireAdmin();
+        driverService.deleteDriver(id);
+        return ResponseEntity.ok(ApiResponse.ok("Driver deleted successfully"));
     }
 }

@@ -71,4 +71,16 @@ public interface DriverPenaltyRepository extends JpaRepository<DriverPenalty, Lo
     @Query("SELECT COALESCE(SUM(p.penaltyPoints), 0) FROM DriverPenalty p " +
            "WHERE p.driver.id = :driverId AND p.status = 'ACTIVE' AND p.deductFromScore = true")
     Double sumActiveSafetyPenaltyPoints(Long driverId);
+
+    @Query("""
+        SELECT p.driver.id,
+               COUNT(CASE WHEN p.status = 'ACTIVE' THEN 1 END),
+               COALESCE(SUM(CASE WHEN p.status = 'ACTIVE' THEN p.monetaryAmount ELSE 0 END), 0),
+               COUNT(CASE WHEN p.status = 'ACTIVE' AND (p.classification = 'WARNING' OR p.monetaryAmount = 0) THEN 1 END),
+               COUNT(CASE WHEN p.status = 'ACTIVE' AND p.classification = 'PENALTY' AND p.monetaryAmount > 0 THEN 1 END)
+        FROM DriverPenalty p
+        WHERE p.driver IS NOT NULL
+        GROUP BY p.driver.id
+    """)
+    List<Object[]> getAllDriverPenaltyAggregates();
 }

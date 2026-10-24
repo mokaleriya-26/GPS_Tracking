@@ -1,9 +1,23 @@
 import React, { useState, useEffect } from 'react';
+import { Row, Col, Card, Badge, Button, Spinner, Alert } from 'react-bootstrap';
 import { 
   User, Mail, Phone, ShieldCheck, Award, Calendar, 
-  FileText, Truck, AlertCircle, RefreshCw 
+  FileText, Truck, AlertCircle, RefreshCw, CheckCircle2 
 } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
+
+const formatDateTime = (dt) => {
+  if (!dt) return '—';
+  try {
+    return new Date(dt).toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch {
+    return dt;
+  }
+};
 
 export default function DriverProfile() {
   const [profile, setProfile] = useState(null);
@@ -20,7 +34,7 @@ export default function DriverProfile() {
         driverPortalApi.getVehicles()
       ]);
       setProfile(profileData);
-      setVehicles(vehicleData);
+      setVehicles(vehicleData || []);
     } catch (err) {
       console.error('Failed to load profile data:', err);
       setError('Unable to load your profile information. Please try again.');
@@ -35,191 +49,285 @@ export default function DriverProfile() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-4 text-slate-400 font-medium">Loading driver profile...</p>
+      <div className="d-flex flex-column items-center justify-content-center py-5 text-center text-muted" style={{ minHeight: '60vh' }}>
+        <Spinner animation="border" variant="success" className="mb-2" />
+        <div style={{ fontSize: 13 }}>Loading driver profile…</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto p-6 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-center">
-        <AlertCircle className="w-10 h-10 text-rose-400 mx-auto mb-2" />
-        <h3 className="text-lg font-semibold text-rose-300">Profile Error</h3>
-        <p className="text-slate-400 text-sm mt-1">{error}</p>
-        <button
-          onClick={fetchProfileData}
-          className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm transition-colors"
-        >
-          <RefreshCw className="w-4 h-4" /> Retry
-        </button>
-      </div>
+      <Alert variant="danger" className="rounded-3 d-flex align-items-center justify-content-between p-3">
+        <div className="d-flex align-items-center gap-2">
+          <AlertCircle size={18} />
+          <span>{error}</span>
+        </div>
+        <Button variant="outline-danger" size="sm" onClick={fetchProfileData}>
+          <RefreshCw size={14} className="me-1" /> Retry
+        </Button>
+      </Alert>
     );
   }
 
   const currentVehicles = vehicles.filter(v => v.assignmentStatus === 'CURRENT');
+  const scoreValue = profile?.safetyScore != null ? Math.round(profile.safetyScore) : 100;
+  const scoreColor = scoreValue >= 85 ? '#059669' : scoreValue >= 70 ? '#d97706' : '#dc2626';
 
   return (
-    <div className="space-y-6">
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Profile</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Personal credentials, licensing status, and verified system assignment details
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Profile</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Personal credentials, licensing status, and verified fleet assignment details.
           </p>
         </div>
-        <button
+        <Button
+          variant="outline-secondary"
+          size="sm"
           onClick={fetchProfileData}
-          className="inline-flex items-center gap-2 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+          className="d-flex align-items-center gap-1.5"
+          style={{ borderRadius: 8, fontSize: 12 }}
         >
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
-        </button>
+          <RefreshCw size={13} />
+          <span>Refresh</span>
+        </Button>
       </div>
 
-      {/* Main Profile Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Profile Card */}
-        <div className="lg:col-span-1 bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-6 flex flex-col items-center text-center">
-          <div className="w-24 h-24 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-xl shadow-emerald-500/10 ring-4 ring-emerald-500/20 mb-4">
-            <User className="w-12 h-12" />
-          </div>
-          <h2 className="text-xl font-bold text-white">{profile?.name || 'Driver'}</h2>
-          <span className="text-xs px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full font-mono font-medium mt-1">
-            {profile?.code || 'ID N/A'}
-          </span>
-
-          <div className="w-full mt-6 pt-6 border-t border-slate-700/50 space-y-3 text-left">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Account Status</span>
-              <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
-                profile?.active !== false 
-                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
-              }`}>
-                {profile?.active !== false ? 'ACTIVE' : 'INACTIVE'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Driver License</span>
-              <span className="font-mono text-slate-200">{profile?.licenseNumber || 'N/A'}</span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-400">Enrolled Since</span>
-              <span className="text-slate-200">
-                {profile?.joinedOn ? new Date(profile.joinedOn).toLocaleDateString() : 'N/A'}
-              </span>
-            </div>
-          </div>
-
-          <div className="w-full mt-6 pt-6 border-t border-slate-700/50 bg-slate-900/40 rounded-xl p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-emerald-500/10 rounded-lg text-emerald-400">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div className="text-left">
-                <div className="text-xs text-slate-400">Safety Index</div>
-                <div className="text-lg font-bold text-white">
-                  {profile?.safetyScore !== undefined && profile?.safetyScore !== null 
-                    ? `${Number(profile.safetyScore).toFixed(1)} / 100` 
-                    : '100 / 100'}
+      <Row className="g-4">
+        {/* Left Column: Identity & Safety Index */}
+        <Col xs={12} lg={4}>
+          <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 14 }}>
+            <div className="card-body p-4 text-center d-flex flex-column justify-content-between">
+              <div>
+                <div
+                  style={{
+                    width: 76,
+                    height: 76,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #059669, #10b981)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 28,
+                    fontWeight: 800,
+                    margin: '0 auto 16px',
+                    boxShadow: '0 8px 20px -4px rgba(5, 150, 105, 0.35)',
+                  }}
+                >
+                  {profile?.name ? profile.name.charAt(0).toUpperCase() : <User size={32} />}
                 </div>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Right Column: Detailed Cards */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Contact & Professional Details */}
-          <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-6">
-            <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-emerald-400" /> Professional Details
-            </h3>
+                <h3 className="fw-bold text-dark mb-1" style={{ fontSize: 20 }}>
+                  {profile?.name || 'Driver'}
+                </h3>
+                <span
+                  className="badge font-monospace mb-3"
+                  style={{
+                    backgroundColor: '#ecfdf5',
+                    color: '#059669',
+                    border: '1px solid #a7f3d0',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    padding: '4px 10px',
+                  }}
+                >
+                  {profile?.code || 'ID N/A'}
+                </span>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/40">
-                <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                  <Mail className="w-3.5 h-3.5 text-blue-400" /> Email Address
-                </div>
-                <div className="text-sm font-medium text-white truncate">
-                  {profile?.email || 'No email registered'}
-                </div>
-              </div>
+                <div className="bg-light p-3 rounded-3 text-start border mt-3" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="d-flex justify-content-between align-items-center mb-2" style={{ fontSize: 12 }}>
+                    <span className="text-muted">Account Status:</span>
+                    <span
+                      className="badge"
+                      style={{
+                        backgroundColor: profile?.active !== false ? '#ecfdf5' : '#fef2f2',
+                        color: profile?.active !== false ? '#059669' : '#dc2626',
+                        fontSize: 10,
+                        fontWeight: 700,
+                      }}
+                    >
+                      {profile?.active !== false ? 'ACTIVE' : 'INACTIVE'}
+                    </span>
+                  </div>
 
-              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/40">
-                <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                  <Phone className="w-3.5 h-3.5 text-teal-400" /> Phone Contact
-                </div>
-                <div className="text-sm font-medium text-white font-mono">
-                  {profile?.phone || 'No phone registered'}
+                  <div className="d-flex justify-content-between align-items-center mb-2" style={{ fontSize: 12 }}>
+                    <span className="text-muted">Driving License:</span>
+                    <strong className="text-dark font-monospace">{profile?.licenseNumber || '—'}</strong>
+                  </div>
+
+                  <div className="d-flex justify-content-between align-items-center" style={{ fontSize: 12 }}>
+                    <span className="text-muted">Joined On:</span>
+                    <span className="text-dark">{formatDateTime(profile?.joinedOn)}</span>
+                  </div>
                 </div>
               </div>
 
-              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/40">
-                <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                  <Award className="w-3.5 h-3.5 text-amber-400" /> Lifetime Recorded Trips
-                </div>
-                <div className="text-sm font-bold text-white">
-                  {profile?.totalTrips || 0} Trips
-                </div>
-              </div>
-
-              <div className="bg-slate-900/40 p-4 rounded-xl border border-slate-700/40">
-                <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                  <Calendar className="w-3.5 h-3.5 text-indigo-400" /> Record Created
-                </div>
-                <div className="text-sm font-medium text-white">
-                  {profile?.createdAt ? new Date(profile.createdAt).toLocaleString() : 'System Seed'}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Currently Assigned Vehicle */}
-          <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-6">
-            <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-              <Truck className="w-4 h-4 text-emerald-400" /> Active Vehicle Assignments
-            </h3>
-
-            {currentVehicles.length === 0 ? (
-              <div className="p-6 bg-slate-900/40 rounded-xl border border-slate-700/40 text-center">
-                <Truck className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                <p className="text-slate-400 text-sm">No vehicles currently assigned directly in the database.</p>
-                <p className="text-xs text-slate-500 mt-1">Contact your fleet administrator if you require assignment updates.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {currentVehicles.map(veh => (
-                  <div key={veh.id} className="p-4 bg-slate-900/50 rounded-xl border border-emerald-500/20 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl pointer-events-none"></div>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-semibold rounded uppercase">
-                          Current Primary
-                        </span>
-                        <h4 className="text-lg font-bold text-white mt-1">{veh.code}</h4>
-                        <p className="text-xs text-slate-400">{veh.model || 'Standard Commercial'}</p>
-                      </div>
-                      <span className="text-xs font-mono font-bold bg-slate-800 px-2 py-1 rounded text-slate-300 border border-slate-700">
-                        {veh.registrationNumber}
-                      </span>
+              {/* Safety Index Tile */}
+              <div
+                className="p-3 rounded-3 mt-4 text-start border"
+                style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%)',
+                  borderColor: '#dcfce7',
+                }}
+              >
+                <div className="d-flex align-items-center gap-3">
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: 10,
+                      background: '#ecfdf5',
+                      color: '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <ShieldCheck size={22} />
+                  </div>
+                  <div>
+                    <div className="text-muted" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 600 }}>
+                      Safety Index
                     </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-700/50 flex items-center justify-between text-xs text-slate-400">
-                      <span>Status: <strong className="text-emerald-400">{veh.status || 'ACTIVE'}</strong></span>
-                      <span>Trips with Driver: <strong className="text-white">{veh.tripCountWithDriver || 0}</strong></span>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: scoreColor, lineHeight: 1.1 }}>
+                      {scoreValue} <span className="text-muted" style={{ fontSize: 13, fontWeight: 400 }}>/ 100</span>
                     </div>
                   </div>
-                ))}
+                </div>
               </div>
-            )}
+            </div>
           </div>
-        </div>
-      </div>
+        </Col>
+
+        {/* Right Column: Contact Details & Active Vehicle Assignments */}
+        <Col xs={12} lg={8}>
+          {/* Professional & Contact Details Card */}
+          <div className="card border-0 shadow-sm mb-4" style={{ borderRadius: 14 }}>
+            <div className="card-header bg-white border-0 py-3 px-4 d-flex align-items-center gap-2">
+              <FileText size={18} color="#059669" />
+              <span className="fw-bold text-dark" style={{ fontSize: 15 }}>Contact & Credentials</span>
+            </div>
+            <div className="card-body p-4 pt-0">
+              <Row className="g-3">
+                <Col xs={12} sm={6}>
+                  <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                    <div className="d-flex align-items-center gap-1.5 text-muted mb-1" style={{ fontSize: 11 }}>
+                      <Mail size={13} className="text-primary" />
+                      <span>Email Address</span>
+                    </div>
+                    <div className="fw-semibold text-dark text-truncate" style={{ fontSize: 13 }}>
+                      {profile?.email || 'driver@trackfleet.internal'}
+                    </div>
+                  </div>
+                </Col>
+
+                <Col xs={12} sm={6}>
+                  <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                    <div className="d-flex align-items-center gap-1.5 text-muted mb-1" style={{ fontSize: 11 }}>
+                      <Phone size={13} className="text-success" />
+                      <span>Phone Contact</span>
+                    </div>
+                    <div className="fw-semibold text-dark font-monospace" style={{ fontSize: 13 }}>
+                      {profile?.phone || '—'}
+                    </div>
+                  </div>
+                </Col>
+
+                <Col xs={12} sm={6}>
+                  <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                    <div className="d-flex align-items-center gap-1.5 text-muted mb-1" style={{ fontSize: 11 }}>
+                      <Award size={13} className="text-warning" />
+                      <span>Lifetime Trips</span>
+                    </div>
+                    <div className="fw-bold text-dark" style={{ fontSize: 15 }}>
+                      {profile?.totalTrips || 0} Recorded Trips
+                    </div>
+                  </div>
+                </Col>
+
+                <Col xs={12} sm={6}>
+                  <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                    <div className="d-flex align-items-center gap-1.5 text-muted mb-1" style={{ fontSize: 11 }}>
+                      <Calendar size={13} className="text-info" />
+                      <span>Profile Created</span>
+                    </div>
+                    <div className="fw-semibold text-dark" style={{ fontSize: 13 }}>
+                      {formatDateTime(profile?.createdAt || profile?.joinedOn)}
+                    </div>
+                  </div>
+                </Col>
+              </Row>
+            </div>
+          </div>
+
+          {/* Active Vehicle Assignments Card */}
+          <div className="card border-0 shadow-sm" style={{ borderRadius: 14 }}>
+            <div className="card-header bg-white border-0 py-3 px-4 d-flex align-items-center gap-2">
+              <Truck size={18} color="#059669" />
+              <span className="fw-bold text-dark" style={{ fontSize: 15 }}>Active Vehicle Assignments</span>
+            </div>
+            <div className="card-body p-4 pt-0">
+              {currentVehicles.length === 0 ? (
+                <div className="p-4 bg-light rounded-3 text-center text-muted" style={{ fontSize: 13 }}>
+                  <Truck size={28} className="text-muted mb-2 opacity-50" />
+                  <div>No vehicles currently assigned directly in the system.</div>
+                  <div className="small text-muted mt-1">Please contact your fleet administrator if you require assignment updates.</div>
+                </div>
+              ) : (
+                <Row className="g-3">
+                  {currentVehicles.map(veh => (
+                    <Col key={veh.id} xs={12} sm={6}>
+                      <div
+                        className="p-3 rounded-3 border"
+                        style={{
+                          background: '#ffffff',
+                          borderColor: '#a7f3d0',
+                          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
+                        }}
+                      >
+                        <div className="d-flex justify-content-between align-items-start mb-2">
+                          <div>
+                            <span
+                              className="badge"
+                              style={{
+                                backgroundColor: '#ecfdf5',
+                                color: '#059669',
+                                fontSize: 9,
+                                fontWeight: 700,
+                              }}
+                            >
+                              CURRENT PRIMARY
+                            </span>
+                            <h4 className="fw-bold text-dark mt-1 mb-0" style={{ fontSize: 16 }}>
+                              {veh.code}
+                            </h4>
+                            <div className="text-muted" style={{ fontSize: 11 }}>
+                              {veh.model || veh.vehicleType || 'Commercial Unit'}
+                            </div>
+                          </div>
+                          <span className="badge bg-light text-dark font-monospace border" style={{ fontSize: 11 }}>
+                            {veh.registrationNumber}
+                          </span>
+                        </div>
+
+                        <div className="pt-2 border-top d-flex justify-content-between align-items-center text-muted" style={{ fontSize: 11 }}>
+                          <span>Status: <strong className="text-success">{veh.status || 'ACTIVE'}</strong></span>
+                          <span>Trips: <strong className="text-dark">{veh.tripCountWithDriver || 0}</strong></span>
+                        </div>
+                      </div>
+                    </Col>
+                  ))}
+                </Row>
+              )}
+            </div>
+          </div>
+        </Col>
+      </Row>
     </div>
   );
 }

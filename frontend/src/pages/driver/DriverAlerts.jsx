@@ -1,9 +1,26 @@
 import React, { useState, useEffect } from 'react';
+import { Card, Table, Badge, Button, Spinner, Alert, Row, Col } from 'react-bootstrap';
 import { 
-  AlertTriangle, ShieldAlert, CheckCircle, Clock, 
-  ChevronLeft, ChevronRight, RefreshCw, Filter, DollarSign, Truck
+  Bell, AlertTriangle, ShieldAlert, CheckCircle, Clock, 
+  ChevronLeft, ChevronRight, RefreshCw, Truck, IndianRupee, MapPin
 } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
+
+const formatDateTime = (dt) => {
+  if (!dt) return '—';
+  try {
+    return new Date(dt).toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return dt;
+  }
+};
 
 export default function DriverAlerts() {
   const [alerts, setAlerts] = useState([]);
@@ -34,179 +51,234 @@ export default function DriverAlerts() {
     fetchAlerts(0);
   }, []);
 
-  const getSeverityBadge = (severity) => {
-    const s = severity?.toUpperCase();
-    switch (s) {
-      case 'CRITICAL':
-        return 'bg-rose-500/10 text-rose-400 border-rose-500/30';
-      case 'HIGH':
-        return 'bg-orange-500/10 text-orange-400 border-orange-500/30';
-      case 'MEDIUM':
-        return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
-      case 'LOW':
-      default:
-        return 'bg-blue-500/10 text-blue-400 border-blue-500/30';
+  const renderSeverityBadge = (severity) => {
+    const s = (severity || 'LOW').toUpperCase();
+    let bg = '#eff6ff';
+    let text = '#2563eb';
+    let border = '#dbeafe';
+
+    if (s.includes('CRITICAL')) {
+      bg = '#fef2f2';
+      text = '#dc2626';
+      border = '#fee2e2';
+    } else if (s.includes('HIGH')) {
+      bg = '#fff7ed';
+      text = '#ea580c';
+      border = '#ffedd5';
+    } else if (s.includes('MEDIUM') || s.includes('WARN')) {
+      bg = '#fffbeb';
+      text = '#d97706';
+      border = '#fef3c7';
     }
+
+    return (
+      <span
+        style={{
+          backgroundColor: bg,
+          color: text,
+          border: `1px solid ${border}`,
+          borderRadius: 6,
+          padding: '2px 8px',
+          fontSize: 11,
+          fontWeight: 700,
+          display: 'inline-block',
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+        }}
+      >
+        {s}
+      </span>
+    );
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      {/* Page Header */}
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Alerts</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Real-time and historical safety infractions, trigger details, and associated penalty amounts
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Alerts</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Review real-time safety infractions, trigger details, and associated penalty amounts.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">
-            Total Logged: <strong className="text-white font-mono">{totalElements}</strong>
+        <div className="d-flex align-items-center gap-3">
+          <span className="text-muted" style={{ fontSize: 13 }}>
+            Total Logged: <strong className="text-dark font-monospace">{totalElements}</strong>
           </span>
-          <button
+          <Button
+            variant="outline-secondary"
+            size="sm"
             onClick={() => fetchAlerts(page)}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+            disabled={loading}
+            className="d-flex align-items-center gap-1.5"
+            style={{ borderRadius: 8, fontSize: 12 }}
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
-          </button>
+            <RefreshCw size={13} className={loading ? 'spin' : ''} />
+            <span>Refresh</span>
+          </Button>
         </div>
       </div>
 
-      {/* Alerts Table */}
-      <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-700/60 bg-slate-900/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Severity</th>
-                <th className="py-3.5 px-4">Alert Event</th>
-                <th className="py-3.5 px-4">Vehicle</th>
-                <th className="py-3.5 px-4">Timestamp</th>
-                <th className="py-3.5 px-4">Penalty</th>
-                <th className="py-3.5 px-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/40 text-sm">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                    Fetching your safety alerts...
-                  </td>
-                </tr>
-              ) : alerts.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center">
-                    <CheckCircle className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
-                    <p className="text-white font-medium">No Alerts Recorded</p>
-                    <p className="text-xs text-slate-400 mt-1">Excellent driving record! No safety infractions logged.</p>
-                  </td>
-                </tr>
-              ) : (
-                alerts.map(alert => (
-                  <tr key={alert.id || alert.reference} className="hover:bg-slate-700/20 transition-colors">
-                    {/* Severity */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${getSeverityBadge(alert.severity)}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          alert.severity === 'CRITICAL' ? 'bg-rose-400 animate-ping' : 'bg-current'
-                        }`} />
-                        {alert.severity || 'INFO'}
-                      </span>
-                    </td>
+      {error && (
+        <Alert variant="danger" className="mb-4 rounded-3 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <Button variant="outline-danger" size="sm" onClick={() => fetchAlerts(page)}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
-                    {/* Alert Type & Message */}
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-white">
-                        {alert.alertType?.replace(/_/g, ' ') || 'Safety Alert'}
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5 line-clamp-1 max-w-md">
-                        {alert.message || (alert.speedKmph ? `Speed: ${alert.speedKmph} km/h (Limit: ${alert.speedLimitKmph || 'N/A'})` : 'Safety system triggered event')}
-                      </div>
-                    </td>
-
-                    {/* Vehicle */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <Truck className="w-4 h-4 text-slate-400" />
-                        <div>
-                          <div className="font-mono text-xs font-bold text-white">
-                            {alert.vehicleCode || 'N/A'}
-                          </div>
-                          <div className="text-[11px] text-slate-400">
-                            {alert.vehicleRegistrationNumber || ''}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Timestamp */}
-                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-300">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        {alert.occurredAt ? new Date(alert.occurredAt).toLocaleString() : 'N/A'}
-                      </div>
-                    </td>
-
-                    {/* Penalty */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {alert.penaltyAmount && Number(alert.penaltyAmount) > 0 ? (
-                        <div className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-full font-mono font-bold text-xs">
-                          <DollarSign className="w-3 h-3" />
-                          ₹{Number(alert.penaltyAmount).toFixed(0)}
-                          {alert.occurrenceNumber && (
-                            <span className="text-[10px] text-rose-300/70 ml-0.5 font-normal">
-                              (#{alert.occurrenceNumber})
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-500">None</span>
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${
-                        alert.status === 'RESOLVED'
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : alert.status === 'ACTIVE'
-                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse'
-                          : 'bg-slate-700 text-slate-300'
-                      }`}>
-                        {alert.status || 'LOGGED'}
-                      </span>
-                    </td>
+      {/* Main Alerts Table Card */}
+      <div className="card border-0 shadow-sm" style={{ borderRadius: 14 }}>
+        <div className="card-body p-0">
+          {loading ? (
+            <div className="py-5 text-center text-muted">
+              <Spinner animation="border" variant="success" size="sm" className="mb-2" />
+              <div style={{ fontSize: 13 }}>Fetching your safety alerts…</div>
+            </div>
+          ) : alerts.length === 0 ? (
+            <div className="py-5 text-center">
+              <CheckCircle size={36} className="text-success mb-2 opacity-75" />
+              <h5 className="fw-bold text-dark mt-1">No Alerts Recorded</h5>
+              <p className="text-muted small mb-0">Excellent driving record! No safety infractions logged for your account.</p>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover align-middle mb-0" style={{ fontSize: 13 }}>
+                <thead className="table-light">
+                  <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                    <th className="ps-4">Severity</th>
+                    <th>Alert Event</th>
+                    <th>Vehicle</th>
+                    <th>Timestamp</th>
+                    <th>Penalty</th>
+                    <th className="pe-4">Status</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {alerts.map((alert) => (
+                    <tr key={alert.id || alert.reference}>
+                      {/* Severity */}
+                      <td className="ps-4">
+                        {renderSeverityBadge(alert.severity)}
+                      </td>
+
+                      {/* Alert Type & Message */}
+                      <td>
+                        <strong className="text-dark">
+                          {alert.alertType?.replace(/_/g, ' ') || 'Safety Alert'}
+                        </strong>
+                        <div className="text-muted" style={{ fontSize: 11, maxWidth: 360 }}>
+                          {alert.message || (alert.speedKmph ? `Speed: ${alert.speedKmph} km/h (Limit: ${alert.speedLimitKmph || '80'} km/h)` : 'Safety telemetry trigger')}
+                        </div>
+                      </td>
+
+                      {/* Vehicle */}
+                      <td>
+                        <div className="d-flex align-items-center gap-2">
+                          <Truck size={16} className="text-muted" />
+                          <div>
+                            <strong className="text-dark font-monospace" style={{ fontSize: 12 }}>
+                              {alert.vehicleCode || '—'}
+                            </strong>
+                            {alert.vehicleRegistrationNumber && (
+                              <div className="text-muted" style={{ fontSize: 11 }}>
+                                {alert.vehicleRegistrationNumber}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Timestamp */}
+                      <td className="text-muted" style={{ fontSize: 12 }}>
+                        <div className="d-flex align-items-center gap-1.5">
+                          <Clock size={13} className="text-muted opacity-75" />
+                          <span>{formatDateTime(alert.occurredAt)}</span>
+                        </div>
+                      </td>
+
+                      {/* Penalty */}
+                      <td>
+                        {alert.penaltyAmount && Number(alert.penaltyAmount) > 0 ? (
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: '#fef2f2',
+                              color: '#dc2626',
+                              border: '1px solid #fee2e2',
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              padding: '4px 8px',
+                            }}
+                          >
+                            ₹{Number(alert.penaltyAmount).toFixed(0)}
+                            {alert.occurrenceNumber && (
+                              <span style={{ fontSize: 10, fontWeight: 400, marginLeft: 4, opacity: 0.8 }}>
+                                (#{alert.occurrenceNumber})
+                              </span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-muted small">None</span>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="pe-4">
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: alert.status === 'RESOLVED' ? '#ecfdf5' : '#f1f5f9',
+                            color: alert.status === 'RESOLVED' ? '#059669' : '#475569',
+                            border: `1px solid ${alert.status === 'RESOLVED' ? '#a7f3d0' : '#e2e8f0'}`,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          {alert.status || 'LOGGED'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="p-4 border-t border-slate-700/60 bg-slate-900/40 flex items-center justify-between text-xs text-slate-400">
-            <div>
-              Showing Page <span className="font-semibold text-white">{page + 1}</span> of{' '}
-              <span className="font-semibold text-white">{totalPages}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
+          <div className="card-footer bg-white border-top py-3 px-4 d-flex align-items-center justify-content-between">
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              Showing Page <strong className="text-dark">{page + 1}</strong> of{' '}
+              <strong className="text-dark">{totalPages}</strong>
+            </span>
+            <div className="d-flex align-items-center gap-2">
+              <Button
+                variant="light"
+                size="sm"
                 onClick={() => fetchAlerts(Math.max(0, page - 1))}
                 disabled={page === 0 || loading}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+                className="d-flex align-items-center border"
               >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
+                <ChevronLeft size={16} />
+              </Button>
+              <Button
+                variant="light"
+                size="sm"
                 onClick={() => fetchAlerts(Math.min(totalPages - 1, page + 1))}
                 disabled={page >= totalPages - 1 || loading}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+                className="d-flex align-items-center border"
               >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                <ChevronRight size={16} />
+              </Button>
             </div>
           </div>
         )}

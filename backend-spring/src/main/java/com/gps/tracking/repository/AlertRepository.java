@@ -203,4 +203,9 @@ public interface AlertRepository extends JpaRepository<Alert, Long>, JpaSpecific
         @Param("from") LocalDateTime from,
         @Param("to") LocalDateTime to
     );
+
+    long countByDriverId(Long driverId);
+
+    @Query("SELECT a.driver.id, COUNT(a) FROM Alert a WHERE a.driver IS NOT NULL GROUP BY a.driver.id")
+    List<Object[]> getAllDriverAlertCounts();
 }

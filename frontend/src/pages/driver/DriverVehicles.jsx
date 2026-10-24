@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, CheckCircle2, History, Gauge, MapPin, RefreshCw, AlertCircle } from 'lucide-react';
+import { Row, Col, Card, Badge, Button, Spinner, Alert } from 'react-bootstrap';
+import { Truck, CheckCircle2, History, Gauge, MapPin, RefreshCw, AlertCircle, Calendar } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
 
 export default function DriverVehicles() {
@@ -13,7 +14,7 @@ export default function DriverVehicles() {
       setLoading(true);
       setError(null);
       const data = await driverPortalApi.getVehicles();
-      setVehicles(data);
+      setVehicles(data || []);
     } catch (err) {
       console.error('Failed to load driver vehicles:', err);
       setError('Unable to fetch vehicle history. Please try again.');
@@ -35,179 +36,217 @@ export default function DriverVehicles() {
   const currentCount = vehicles.filter(v => v.assignmentStatus === 'CURRENT').length;
   const historicalCount = vehicles.filter(v => v.assignmentStatus === 'HISTORICAL').length;
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="mt-4 text-slate-400 font-medium">Loading vehicle history...</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Vehicles</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Current primary vehicle assignments and historical fleet units operated across your trips
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Vehicles</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Current assigned vehicles and historical fleet units operated across your trips.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="d-flex align-items-center gap-2">
           {/* Filter Pills */}
-          <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 text-xs">
-            <button
+          <div className="btn-group bg-white p-1 rounded-3 border" style={{ borderColor: '#e2e8f0' }}>
+            <Button
+              variant={filter === 'ALL' ? 'success' : 'light'}
+              size="sm"
               onClick={() => setFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                filter === 'ALL'
-                  ? 'bg-emerald-500 text-slate-950 font-semibold shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              className="fw-semibold"
+              style={{
+                fontSize: 12,
+                borderRadius: 6,
+                backgroundColor: filter === 'ALL' ? '#059669' : 'transparent',
+                borderColor: filter === 'ALL' ? '#059669' : 'transparent',
+                color: filter === 'ALL' ? '#ffffff' : '#64748b',
+              }}
             >
               All ({vehicles.length})
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={filter === 'CURRENT' ? 'success' : 'light'}
+              size="sm"
               onClick={() => setFilter('CURRENT')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                filter === 'CURRENT'
-                  ? 'bg-emerald-500 text-slate-950 font-semibold shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              className="fw-semibold"
+              style={{
+                fontSize: 12,
+                borderRadius: 6,
+                backgroundColor: filter === 'CURRENT' ? '#059669' : 'transparent',
+                borderColor: filter === 'CURRENT' ? '#059669' : 'transparent',
+                color: filter === 'CURRENT' ? '#ffffff' : '#64748b',
+              }}
             >
-              Active ({currentCount})
-            </button>
-            <button
+              Assigned ({currentCount})
+            </Button>
+            <Button
+              variant={filter === 'HISTORICAL' ? 'success' : 'light'}
+              size="sm"
               onClick={() => setFilter('HISTORICAL')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                filter === 'HISTORICAL'
-                  ? 'bg-emerald-500 text-slate-950 font-semibold shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              className="fw-semibold"
+              style={{
+                fontSize: 12,
+                borderRadius: 6,
+                backgroundColor: filter === 'HISTORICAL' ? '#059669' : 'transparent',
+                borderColor: filter === 'HISTORICAL' ? '#059669' : 'transparent',
+                color: filter === 'HISTORICAL' ? '#ffffff' : '#64748b',
+              }}
             >
               Historical ({historicalCount})
-            </button>
+            </Button>
           </div>
 
-          <button
+          <Button
+            variant="outline-secondary"
+            size="sm"
             onClick={fetchVehicles}
-            className="p-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 rounded-xl transition-colors"
+            disabled={loading}
+            className="d-flex align-items-center"
+            style={{ borderRadius: 8, height: 34, width: 34, padding: 0, justifyContent: 'center' }}
             title="Refresh list"
           >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+            <RefreshCw size={13} className={loading ? 'spin' : ''} />
+          </Button>
         </div>
       </div>
 
       {error && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between text-rose-300 text-sm">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+        <Alert variant="danger" className="mb-4 rounded-3 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <AlertCircle size={18} />
             <span>{error}</span>
           </div>
-          <button onClick={fetchVehicles} className="underline text-xs hover:text-rose-200">Retry</button>
-        </div>
+          <Button variant="outline-danger" size="sm" onClick={fetchVehicles}>
+            Retry
+          </Button>
+        </Alert>
       )}
 
-      {/* Vehicles Grid */}
-      {filteredVehicles.length === 0 ? (
-        <div className="bg-slate-800/40 border border-slate-700/60 rounded-2xl p-12 text-center">
-          <Truck className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-semibold text-white">No Vehicles Found</h3>
-          <p className="text-slate-400 text-sm mt-1 max-w-md mx-auto">
+      {loading ? (
+        <div className="py-5 text-center text-muted" style={{ minHeight: '40vh' }}>
+          <Spinner animation="border" variant="success" size="sm" className="mb-2" />
+          <div style={{ fontSize: 13 }}>Loading assigned vehicles…</div>
+        </div>
+      ) : filteredVehicles.length === 0 ? (
+        <div className="card border-0 shadow-sm p-5 text-center" style={{ borderRadius: 14 }}>
+          <Truck size={36} className="text-muted mx-auto mb-2 opacity-50" />
+          <h5 className="fw-bold text-dark">No Vehicles Found</h5>
+          <p className="text-muted small mb-0">
             {filter === 'ALL'
               ? 'No vehicle records or past trip logs are associated with this driver identity.'
               : `No ${filter.toLowerCase()} vehicles found matching your current filter.`}
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredVehicles.map(veh => {
+        <Row className="g-3">
+          {filteredVehicles.map((veh) => {
             const isCurrent = veh.assignmentStatus === 'CURRENT';
+
             return (
-              <div
-                key={veh.id}
-                className={`bg-slate-800/60 backdrop-blur border rounded-2xl p-6 relative overflow-hidden transition-all hover:border-slate-600 ${
-                  isCurrent 
-                    ? 'border-emerald-500/40 shadow-lg shadow-emerald-500/5' 
-                    : 'border-slate-700/60 opacity-90'
-                }`}
-              >
-                {/* Glow for current */}
-                {isCurrent && (
-                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-                )}
-
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-3 rounded-xl ${
-                      isCurrent 
-                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                        : 'bg-slate-700/40 text-slate-400 border border-slate-700'
-                    }`}>
-                      <Truck className="w-6 h-6" />
-                    </div>
+              <Col key={veh.id} xs={12} md={6} lg={4}>
+                <div
+                  className="card border-0 shadow-sm h-100"
+                  style={{
+                    borderRadius: 14,
+                    border: isCurrent ? '1.5px solid #a7f3d0 !important' : '1px solid #e2e8f0 !important',
+                    background: isCurrent ? 'linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%)' : '#ffffff',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <div className="card-body p-4 d-flex flex-column justify-content-between">
                     <div>
-                      <h3 className="text-lg font-bold text-white tracking-tight">{veh.code}</h3>
-                      <p className="text-xs text-slate-400">{veh.model || 'Commercial Fleet Unit'}</p>
-                    </div>
-                  </div>
+                      <div className="d-flex align-items-start justify-content-between mb-3">
+                        <div className="d-flex align-items-center gap-2.5">
+                          <div
+                            style={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: 10,
+                              background: isCurrent ? '#ecfdf5' : '#f1f5f9',
+                              color: isCurrent ? '#059669' : '#64748b',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <Truck size={20} />
+                          </div>
+                          <div>
+                            <h3 className="fw-bold text-dark m-0" style={{ fontSize: 17 }}>
+                              {veh.code}
+                            </h3>
+                            <span className="text-muted" style={{ fontSize: 12 }}>
+                              {veh.model || veh.vehicleType || 'Commercial Unit'}
+                            </span>
+                          </div>
+                        </div>
 
-                  <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${
-                    isCurrent 
-                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                      : 'bg-slate-700/40 text-slate-400 border-slate-600'
-                  }`}>
-                    {isCurrent ? (
-                      <>
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                        ASSIGNED
-                      </>
-                    ) : (
-                      <>
-                        <History className="w-3 h-3 text-slate-400" />
-                        HISTORICAL
-                      </>
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: isCurrent ? '#ecfdf5' : '#f1f5f9',
+                            color: isCurrent ? '#059669' : '#64748b',
+                            border: `1px solid ${isCurrent ? '#a7f3d0' : '#e2e8f0'}`,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: '4px 8px',
+                          }}
+                        >
+                          {isCurrent ? (
+                            <>
+                              <CheckCircle2 size={11} className="me-1" />
+                              ASSIGNED
+                            </>
+                          ) : (
+                            <>
+                              <History size={11} className="me-1" />
+                              HISTORICAL
+                            </>
+                          )}
+                        </span>
+                      </div>
+
+                      {/* Info Rows */}
+                      <div className="bg-light p-3 rounded-3 mb-3 border" style={{ borderColor: '#f1f5f9' }}>
+                        <div className="d-flex justify-content-between align-items-center mb-1.5" style={{ fontSize: 12 }}>
+                          <span className="text-muted">Registration Plate:</span>
+                          <strong className="text-dark font-monospace">{veh.registrationNumber}</strong>
+                        </div>
+                        <div className="d-flex justify-content-between align-items-center mb-1.5" style={{ fontSize: 12 }}>
+                          <span className="text-muted">Vehicle Status:</span>
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: veh.status === 'ACTIVE' ? '#ecfdf5' : '#f1f5f9',
+                              color: veh.status === 'ACTIVE' ? '#059669' : '#475569',
+                              fontSize: 10,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {veh.status || 'ACTIVE'}
+                          </span>
+                        </div>
+                        <div className="d-flex justify-content-between align-items-center" style={{ fontSize: 12 }}>
+                          <span className="text-muted">Trips with You:</span>
+                          <strong className="text-dark">{veh.tripCountWithDriver || 0} Trips</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {veh.lastKnownLocation && (
+                      <div className="text-muted d-flex align-items-center gap-1.5 pt-2 border-top" style={{ fontSize: 11 }}>
+                        <MapPin size={12} className="text-danger flex-shrink-0" />
+                        <span className="text-truncate">{veh.lastKnownLocation}</span>
+                      </div>
                     )}
-                  </span>
+                  </div>
                 </div>
-
-                <div className="mt-6 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-slate-700/40">
-                    <span className="text-slate-400">Registration Plate</span>
-                    <span className="font-mono font-bold text-white tracking-wider">{veh.registrationNumber}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-slate-700/40">
-                    <span className="text-slate-400">Status</span>
-                    <span className={`font-semibold ${
-                      veh.status === 'ACTIVE' ? 'text-emerald-400' : 'text-slate-300'
-                    }`}>
-                      {veh.status || 'ACTIVE'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-slate-700/40">
-                    <span className="text-slate-400">Trips Driven</span>
-                    <span className="font-bold text-white">
-                      {veh.tripCountWithDriver || 0} Trips
-                    </span>
-                  </div>
-
-                  {veh.lastKnownLocation && (
-                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-900/40 border border-slate-700/40">
-                      <span className="text-slate-400 flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-rose-400" /> Location
-                      </span>
-                      <span className="text-slate-300 truncate max-w-[140px]">{veh.lastKnownLocation}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+              </Col>
             );
           })}
-        </div>
+        </Row>
       )}
     </div>
   );

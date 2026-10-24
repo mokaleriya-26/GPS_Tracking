@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { Row, Col, Card, Form, Button, Table, Badge, Spinner, Alert } from 'react-bootstrap';
 import { 
-  FileText, Printer, Share2, Download, Calendar, 
-  ShieldCheck, AlertTriangle, DollarSign, Clock, RefreshCw, CheckCircle2, Copy
+  FileText, Printer, Share2, Calendar, 
+  ShieldCheck, AlertTriangle, IndianRupee, Clock, RefreshCw, CheckCircle2, Copy
 } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
 
 export default function DriverReports() {
-  const [periodType, setPeriodType] = useState('MONTHLY'); // MONTHLY, WEEKLY, DAILY, CUSTOM
+  const [periodType, setPeriodType] = useState('MONTHLY'); // MONTHLY, CUSTOM
   const [month, setMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -46,7 +47,6 @@ export default function DriverReports() {
         payload.startDate = new Date(dateFrom).toISOString();
         payload.endDate = new Date(dateTo).toISOString();
       } else {
-        // Default to last 30 days
         const end = new Date();
         const start = new Date();
         start.setDate(end.getDate() - 30);
@@ -64,7 +64,6 @@ export default function DriverReports() {
     }
   };
 
-  // Auto-generate initial report
   useEffect(() => {
     handleGenerate();
   }, []);
@@ -73,15 +72,26 @@ export default function DriverReports() {
     window.print();
   };
 
+  const copyToClipboard = (text) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        setShareToast({ type: 'success', message: 'Report summary copied to clipboard!' });
+        setTimeout(() => setShareToast(null), 4000);
+      }).catch(() => {
+        setShareToast({ type: 'danger', message: 'Failed to copy report to clipboard.' });
+      });
+    }
+  };
+
   const handleShare = async () => {
     if (!report) return;
 
-    const reportTitle = `Driver Safety & Activity Report - ${report.driverName || 'Driver'}`;
+    const reportTitle = `TrackFleet Driver Report - ${report.driverName || 'Driver'}`;
     const reportText = `TrackFleet Personal Report:
-Driver: ${report.driverName || 'Driver'} (${report.driverCode || 'N/A'})
+Driver: ${report.driverName || 'Driver'} (${report.driverCode || '—'})
 Safety Score: ${report.driverSafetyScore ?? '100'}/100
 Total Trips: ${report.totalTrips ?? 0}
-Distance: ${report.totalDistanceKm ?? 0} km
+Distance: ${report.totalDistanceKm ? Number(report.totalDistanceKm).toFixed(1) : 0} km
 Total Penalties: ₹${report.totalPenaltyAmount ?? 0}
 Alerts Logged: ${report.totalAlerts ?? 0}
 Period: ${report.periodStart ? new Date(report.periodStart).toLocaleDateString() : ''} - ${report.periodEnd ? new Date(report.periodEnd).toLocaleDateString() : ''}`;
@@ -104,238 +114,311 @@ Period: ${report.periodStart ? new Date(report.periodStart).toLocaleDateString()
     }
   };
 
-  const copyToClipboard = (text) => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).then(() => {
-        setShareToast({ type: 'success', message: 'Report summary copied to clipboard!' });
-        setTimeout(() => setShareToast(null), 4000);
-      }).catch(() => {
-        setShareToast({ type: 'error', message: 'Failed to copy report to clipboard.' });
-      });
-    }
-  };
-
   return (
-    <div className="space-y-6">
-      {/* Toast Notification for Share */}
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      {/* Toast Alert for Share Feedback */}
       {shareToast && (
-        <div className={`p-4 rounded-xl border flex items-center justify-between text-sm transition-all ${
-          shareToast.type === 'success' 
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
-            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-        }`}>
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4" />
-            <span>{shareToast.message}</span>
-          </div>
-          <button onClick={() => setShareToast(null)} className="text-xs underline">Dismiss</button>
-        </div>
+        <Alert
+          variant={shareToast.type === 'success' ? 'success' : 'danger'}
+          dismissible
+          onClose={() => setShareToast(null)}
+          className="mb-4 rounded-3 d-flex align-items-center gap-2"
+        >
+          <CheckCircle2 size={16} />
+          <span>{shareToast.message}</span>
+        </Alert>
       )}
 
       {/* Header (Hidden in Print) */}
-      <div className="no-print flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="no-print d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Reports</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Generate and export personal driver performance, safety compliance, and penalty reports
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Reports</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Generate and export personal driver performance, compliance, and penalty reports.
           </p>
         </div>
 
         {report && (
-          <div className="flex items-center gap-3">
-            <button
+          <div className="d-flex align-items-center gap-2">
+            <Button
+              variant="outline-secondary"
+              size="sm"
               onClick={handleShare}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold shadow-sm transition-colors"
+              className="d-flex align-items-center gap-1.5"
+              style={{ borderRadius: 8, fontSize: 12 }}
               title="Share report summary"
             >
-              <Share2 className="w-4 h-4 text-emerald-400" /> Share
-            </button>
-            <button
+              <Share2 size={14} color="#059669" />
+              <span>Share</span>
+            </Button>
+            <Button
+              variant="success"
+              size="sm"
               onClick={handlePrint}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-xl text-xs shadow-sm transition-colors"
+              className="d-flex align-items-center gap-1.5 fw-semibold"
+              style={{
+                borderRadius: 8,
+                fontSize: 12,
+                background: 'linear-gradient(135deg, #059669, #047857)',
+                border: 'none',
+              }}
               title="Print report on A4 paper"
             >
-              <Printer className="w-4 h-4" /> Print Report
-            </button>
+              <Printer size={14} />
+              <span>Print Report</span>
+            </Button>
           </div>
         )}
       </div>
 
-      {/* Configuration Controls (Hidden in Print) */}
-      <div className="no-print bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-6">
-        <form onSubmit={handleGenerate} className="flex flex-wrap items-end gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1.5">Period Type</label>
-            <select
-              value={periodType}
-              onChange={(e) => setPeriodType(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              <option value="MONTHLY">Monthly</option>
-              <option value="CUSTOM">Custom Range</option>
-            </select>
-          </div>
-
-          {periodType === 'MONTHLY' ? (
-            <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Select Month</label>
-              <input
-                type="month"
-                value={month}
-                onChange={(e) => setMonth(e.target.value)}
-                className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+      {/* Filter Controls Card (Hidden in Print) */}
+      <div className="no-print card border-0 shadow-sm mb-4" style={{ borderRadius: 14 }}>
+        <div className="card-body p-4">
+          <form onSubmit={handleGenerate} className="row g-3 align-items-end">
+            <div className="col-12 col-sm-auto">
+              <label className="form-label text-muted fw-semibold" style={{ fontSize: 12 }}>
+                Period Type
+              </label>
+              <select
+                className="form-select form-select-sm"
+                value={periodType}
+                onChange={(e) => setPeriodType(e.target.value)}
+                style={{ borderRadius: 8, minWidth: 140 }}
+              >
+                <option value="MONTHLY">Monthly</option>
+                <option value="CUSTOM">Custom Range</option>
+              </select>
             </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">Start Date</label>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1.5">End Date</label>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-            </>
-          )}
 
-          <button
-            type="submit"
-            disabled={generating}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-sm transition-all disabled:opacity-50"
-          >
-            {generating ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin" /> Generating...
-              </>
+            {periodType === 'MONTHLY' ? (
+              <div className="col-12 col-sm-auto">
+                <label className="form-label text-muted fw-semibold" style={{ fontSize: 12 }}>
+                  Select Month
+                </label>
+                <input
+                  type="month"
+                  className="form-control form-control-sm"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  style={{ borderRadius: 8 }}
+                />
+              </div>
             ) : (
               <>
-                <FileText className="w-4 h-4" /> Generate Report
+                <div className="col-12 col-sm-auto">
+                  <label className="form-label text-muted fw-semibold" style={{ fontSize: 12 }}>
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control form-control-sm"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    style={{ borderRadius: 8 }}
+                  />
+                </div>
+                <div className="col-12 col-sm-auto">
+                  <label className="form-label text-muted fw-semibold" style={{ fontSize: 12 }}>
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control form-control-sm"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    style={{ borderRadius: 8 }}
+                  />
+                </div>
               </>
             )}
-          </button>
-        </form>
 
-        {error && (
-          <p className="mt-4 text-xs text-rose-400 font-medium">{error}</p>
-        )}
+            <div className="col-12 col-sm-auto">
+              <Button
+                type="submit"
+                variant="success"
+                size="sm"
+                disabled={generating}
+                className="d-flex align-items-center gap-1.5 fw-semibold"
+                style={{
+                  borderRadius: 8,
+                  padding: '7px 16px',
+                  background: 'linear-gradient(135deg, #059669, #047857)',
+                  border: 'none',
+                }}
+              >
+                {generating ? (
+                  <>
+                    <RefreshCw size={14} className="spin" />
+                    <span>Generating…</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={14} />
+                    <span>Generate Report</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+
+          {error && (
+            <div className="mt-3 text-danger small">
+              {error}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Generated Report View (A4 Print Ready) */}
       {report && (
-        <div className="report-print-container bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-8 space-y-8">
-          {/* Print Header */}
-          <div className="border-b border-slate-700/60 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  CONFIDENTIAL DRIVER STATEMENT
-                </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  Ref: TRK-{report.id || Math.floor(Math.random() * 90000 + 10000)}
-                </span>
+        <div
+          className="report-print-container card border-0 shadow-sm"
+          style={{ borderRadius: 14, overflow: 'hidden' }}
+        >
+          <div className="card-body p-4 p-md-5">
+            {/* Report Header */}
+            <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between pb-4 mb-4 border-bottom gap-3">
+              <div>
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span
+                    className="badge"
+                    style={{
+                      backgroundColor: '#ecfdf5',
+                      color: '#059669',
+                      border: '1px solid #a7f3d0',
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  >
+                    PERSONAL DRIVER STATEMENT
+                  </span>
+                  <span className="text-muted font-monospace small">
+                    Ref: TRK-{report.id || Math.floor(Math.random() * 90000 + 10000)}
+                  </span>
+                </div>
+                <h2 className="fw-bold text-dark mb-1" style={{ fontSize: 22 }}>
+                  Driver Performance & Safety Compliance Report
+                </h2>
+                <p className="text-muted small mb-0">
+                  Period:{' '}
+                  {report.periodStart ? new Date(report.periodStart).toLocaleDateString() : 'Start'} to{' '}
+                  {report.periodEnd ? new Date(report.periodEnd).toLocaleDateString() : 'End'} · Generated on{' '}
+                  {new Date().toLocaleString()}
+                </p>
               </div>
-              <h2 className="text-2xl font-bold text-white mt-2">
-                Driver Performance & Compliance Report
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Period: {report.periodStart ? new Date(report.periodStart).toLocaleDateString() : 'Start'} to{' '}
-                {report.periodEnd ? new Date(report.periodEnd).toLocaleDateString() : 'End'} | Generated on{' '}
-                {new Date().toLocaleString()}
-              </p>
-            </div>
 
-            <div className="text-right">
-              <div className="text-sm font-bold text-white">{report.driverName || 'Driver'}</div>
-              <div className="text-xs text-slate-400 font-mono">ID: {report.driverCode || 'N/A'}</div>
-              <div className="text-xs text-slate-400">Assigned: {report.vehicleCode || 'Fleet'}</div>
-            </div>
-          </div>
-
-          {/* Metric Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50">
-              <div className="text-xs text-slate-400">Safety Index</div>
-              <div className="text-2xl font-bold text-white font-mono mt-1">
-                {report.driverSafetyScore !== undefined && report.driverSafetyScore !== null
-                  ? `${Number(report.driverSafetyScore).toFixed(1)}`
-                  : '100'} / 100
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50">
-              <div className="text-xs text-slate-400">Total Trips</div>
-              <div className="text-2xl font-bold text-white font-mono mt-1">
-                {report.totalTrips || 0}
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50">
-              <div className="text-xs text-slate-400">Distance Driven</div>
-              <div className="text-2xl font-bold text-white font-mono mt-1">
-                {report.totalDistanceKm ? `${Number(report.totalDistanceKm).toFixed(1)} km` : '0.0 km'}
+              <div className="text-md-end">
+                <div className="fw-bold text-dark" style={{ fontSize: 16 }}>
+                  {report.driverName || 'Driver'}
+                </div>
+                <div className="text-muted font-monospace small">
+                  Driver ID: {report.driverCode || '—'}
+                </div>
+                <div className="text-muted small">
+                  Vehicle: {report.vehicleCode || 'Fleet Vehicle'}
+                </div>
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-900/50 border border-slate-700/50">
-              <div className="text-xs text-slate-400">Penalties Assessed</div>
-              <div className="text-2xl font-bold text-rose-400 font-mono mt-1">
-                ₹{Number(report.totalPenaltyAmount || 0).toLocaleString('en-IN')}
-              </div>
-            </div>
-          </div>
+            {/* Metric Summary Cards */}
+            <Row className="g-3 mb-4">
+              <Col xs={6} md={3}>
+                <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="text-muted text-uppercase fw-semibold" style={{ fontSize: 11 }}>
+                    Safety Index
+                  </div>
+                  <div className="fw-bold text-success font-monospace mt-1" style={{ fontSize: 24 }}>
+                    {report.driverSafetyScore !== undefined && report.driverSafetyScore !== null
+                      ? `${Number(report.driverSafetyScore).toFixed(1)}`
+                      : '100'} <span className="text-muted small">/ 100</span>
+                  </div>
+                </div>
+              </Col>
 
-          {/* Alert & Violation Breakdown Table */}
-          <div>
-            <h3 className="text-sm font-semibold text-white mb-3">Infraction & Safety Event Breakdown</h3>
-            <div className="overflow-x-auto rounded-xl border border-slate-700/50">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-900/60 text-slate-400 border-b border-slate-700/50">
-                    <th className="py-2.5 px-3">Event Type</th>
-                    <th className="py-2.5 px-3">Occurrences</th>
-                    <th className="py-2.5 px-3">Severity Level</th>
-                    <th className="py-2.5 px-3">Penalty Incurred</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700/30">
-                  {report.alertBreakdown && report.alertBreakdown.length > 0 ? (
-                    report.alertBreakdown.map((item, i) => (
-                      <tr key={i} className="hover:bg-slate-700/20">
-                        <td className="py-2.5 px-3 font-medium text-white">{item.alertType || item.type}</td>
-                        <td className="py-2.5 px-3 text-slate-300 font-mono">{item.count}</td>
-                        <td className="py-2.5 px-3 text-slate-300">{item.severity || 'STANDARD'}</td>
-                        <td className="py-2.5 px-3 text-rose-400 font-mono">
-                          ₹{Number(item.penaltyAmount || 0).toFixed(0)}
+              <Col xs={6} md={3}>
+                <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="text-muted text-uppercase fw-semibold" style={{ fontSize: 11 }}>
+                    Total Trips
+                  </div>
+                  <div className="fw-bold text-dark font-monospace mt-1" style={{ fontSize: 24 }}>
+                    {report.totalTrips || 0}
+                  </div>
+                </div>
+              </Col>
+
+              <Col xs={6} md={3}>
+                <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="text-muted text-uppercase fw-semibold" style={{ fontSize: 11 }}>
+                    Distance Driven
+                  </div>
+                  <div className="fw-bold text-dark font-monospace mt-1" style={{ fontSize: 24 }}>
+                    {report.totalDistanceKm ? `${Number(report.totalDistanceKm).toFixed(1)} km` : '0.0 km'}
+                  </div>
+                </div>
+              </Col>
+
+              <Col xs={6} md={3}>
+                <div className="bg-light p-3 rounded-3 border" style={{ borderColor: '#f1f5f9' }}>
+                  <div className="text-muted text-uppercase fw-semibold" style={{ fontSize: 11 }}>
+                    Penalties Assessed
+                  </div>
+                  <div className="fw-bold text-danger font-monospace mt-1" style={{ fontSize: 24 }}>
+                    ₹{Number(report.totalPenaltyAmount || 0).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </Col>
+            </Row>
+
+            {/* Infraction & Safety Event Breakdown Table */}
+            <div className="mb-4">
+              <h5 className="fw-bold text-dark mb-3" style={{ fontSize: 15 }}>
+                Infraction & Safety Event Breakdown
+              </h5>
+              <div className="table-responsive rounded-3 border" style={{ borderColor: '#e2e8f0' }}>
+                <table className="table table-hover align-middle mb-0" style={{ fontSize: 13 }}>
+                  <thead className="table-light">
+                    <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                      <th className="ps-3">Event Type</th>
+                      <th>Occurrences</th>
+                      <th>Severity Level</th>
+                      <th className="pe-3 text-end">Penalty Incurred</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.alertBreakdown && report.alertBreakdown.length > 0 ? (
+                      report.alertBreakdown.map((item, i) => (
+                        <tr key={i}>
+                          <td className="ps-3 fw-semibold text-dark">
+                            {item.alertType || item.type}
+                          </td>
+                          <td className="font-monospace text-dark">{item.count}</td>
+                          <td>
+                            <span className="badge bg-light text-secondary border" style={{ fontSize: 10 }}>
+                              {item.severity || 'STANDARD'}
+                            </span>
+                          </td>
+                          <td className="pe-3 text-end text-danger font-monospace fw-bold">
+                            ₹{Number(item.penaltyAmount || 0).toFixed(0)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="py-4 text-center text-muted">
+                          No infractions or safety violations reported during this time frame.
                         </td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="py-6 text-center text-slate-400">
-                        No infractions or safety violations reported during this time frame.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
 
-          {/* Footer for Print */}
-          <div className="pt-6 border-t border-slate-700/60 flex items-center justify-between text-[11px] text-slate-400">
-            <div>TrackFleet Autonomous Telematics System — Official Record</div>
-            <div>Confidential • Personal Driver Access Only</div>
+            {/* Print Footer */}
+            <div className="pt-3 border-top d-flex justify-content-between align-items-center text-muted" style={{ fontSize: 11 }}>
+              <div>TrackFleet Autonomous Telematics System — Official Record</div>
+              <div>Confidential · Personal Driver Access Only</div>
+            </div>
           </div>
         </div>
       )}

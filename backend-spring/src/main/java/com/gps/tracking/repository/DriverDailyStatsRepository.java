@@ -18,4 +18,7 @@ public interface DriverDailyStatsRepository extends JpaRepository<DriverDailySta
 
     @Query("SELECT s.driver.id, AVG(s.safetyScore) as avgScore FROM DriverDailyStats s WHERE s.statDate BETWEEN :from AND :to GROUP BY s.driver.id ORDER BY avgScore DESC")
     List<Object[]> getDriverRanking(LocalDate from, LocalDate to);
+
+    @Query("SELECT s.driver.id, AVG(s.safetyScore) FROM DriverDailyStats s GROUP BY s.driver.id")
+    List<Object[]> getAllDriverAverageScores();
 }

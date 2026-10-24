@@ -1,9 +1,26 @@
 import React, { useState, useEffect } from 'react';
+import { Row, Col, Card, Table, Badge, Button, Spinner, Alert } from 'react-bootstrap';
 import { 
-  DollarSign, AlertTriangle, ShieldAlert, CheckCircle2, 
-  Clock, RefreshCw, Calendar, FileText, ArrowUpRight 
+  Scale, AlertTriangle, ShieldAlert, CheckCircle2, 
+  Calendar, RefreshCw, IndianRupee, Truck, FileText
 } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
+
+const formatDateTime = (dt) => {
+  if (!dt) return '—';
+  try {
+    return new Date(dt).toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return dt;
+  }
+};
 
 export default function DriverPenalties() {
   const [penalties, setPenalties] = useState([]);
@@ -37,181 +54,273 @@ export default function DriverPenalties() {
     ? summary.totalMonetaryAmount 
     : penalties.reduce((acc, p) => acc + (Number(p.monetaryAmount) || 0), 0);
 
+  const activeCount = summary?.activeCount ?? penalties.filter(p => p.status === 'ACTIVE').length;
+  const waivedCount = summary?.waivedCount ?? penalties.filter(p => p.status === 'WAIVED' || p.status === 'REVOKED').length;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      {/* Page Header */}
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Penalties</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Progressive infraction deductions, fine records, and safety disciplinary status
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Penalties</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Progressive infraction deductions, fine records, and safety disciplinary status.
           </p>
         </div>
 
-        <button
+        <Button
+          variant="outline-secondary"
+          size="sm"
           onClick={fetchPenaltiesData}
-          className="inline-flex items-center gap-2 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+          disabled={loading}
+          className="d-flex align-items-center gap-1.5"
+          style={{ borderRadius: 8, fontSize: 12 }}
         >
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
-        </button>
+          <RefreshCw size={13} className={loading ? 'spin' : ''} />
+          <span>Refresh</span>
+        </Button>
       </div>
+
+      {error && (
+        <Alert variant="danger" className="mb-4 rounded-3 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <Button variant="outline-danger" size="sm" onClick={fetchPenaltiesData}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
       {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <Row className="g-3 mb-4">
         {/* Total Penalties Amount */}
-        <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Total Fines Assessed</span>
-            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400">
-              <DollarSign className="w-4 h-4" />
+        <Col xs={12} sm={6} lg={3}>
+          <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 14 }}>
+            <div className="card-body p-3 d-flex flex-column justify-content-between">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Total Fines Assessed
+                </span>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fef2f2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <IndianRupee size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#dc2626', lineHeight: 1.2 }}>
+                ₹{Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+              </div>
+              <div className="mt-2 text-muted" style={{ fontSize: 11 }}>
+                Cumulative financial liability
+              </div>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono mt-3">
-            ₹{Number(totalAmount).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Cumulative financial liability
-          </p>
-        </div>
+        </Col>
 
-        {/* Total Infractions Count */}
-        <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Total Infractions</span>
-            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400">
-              <AlertTriangle className="w-4 h-4" />
+        {/* Total Infractions */}
+        <Col xs={12} sm={6} lg={3}>
+          <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 14 }}>
+            <div className="card-body p-3 d-flex flex-column justify-content-between">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Total Infractions
+                </span>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fffbeb', color: '#d97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <AlertTriangle size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', lineHeight: 1.2 }}>
+                {penalties.length}
+              </div>
+              <div className="mt-2 text-muted" style={{ fontSize: 11 }}>
+                Recorded violation incidents
+              </div>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono mt-3">
-            {penalties.length}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Recorded violation occurrences
-          </p>
-        </div>
+        </Col>
 
-        {/* Active Penalties */}
-        <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Active Records</span>
-            <div className="p-2 rounded-xl bg-orange-500/10 text-orange-400">
-              <ShieldAlert className="w-4 h-4" />
+        {/* Active Records */}
+        <Col xs={12} sm={6} lg={3}>
+          <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 14 }}>
+            <div className="card-body p-3 d-flex flex-column justify-content-between">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Active Records
+                </span>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fff7ed', color: '#ea580c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ShieldAlert size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#ea580c', lineHeight: 1.2 }}>
+                {activeCount}
+              </div>
+              <div className="mt-2 text-muted" style={{ fontSize: 11 }}>
+                Pending or active deductions
+              </div>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono mt-3">
-            {summary?.activeCount ?? penalties.filter(p => p.status === 'ACTIVE').length}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Pending or active deductions
-          </p>
-        </div>
+        </Col>
 
-        {/* Waived or Cleared */}
-        <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Waived / Resolved</span>
-            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
-              <CheckCircle2 className="w-4 h-4" />
+        {/* Waived or Resolved */}
+        <Col xs={12} sm={6} lg={3}>
+          <div className="card border-0 shadow-sm h-100" style={{ borderRadius: 14 }}>
+            <div className="card-body p-3 d-flex flex-column justify-content-between">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Waived / Resolved
+                </span>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <CheckCircle2 size={18} />
+                </div>
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#059669', lineHeight: 1.2 }}>
+                {waivedCount}
+              </div>
+              <div className="mt-2 text-muted" style={{ fontSize: 11 }}>
+                Appealed or excused penalties
+              </div>
             </div>
           </div>
-          <div className="text-2xl font-bold text-white font-mono mt-3">
-            {summary?.waivedCount ?? penalties.filter(p => p.status === 'WAIVED' || p.status === 'REVOKED').length}
+        </Col>
+      </Row>
+
+      {/* Penalties List Table Card */}
+      <div className="card border-0 shadow-sm" style={{ borderRadius: 14 }}>
+        <div className="card-header bg-white border-0 py-3 px-4 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <Scale size={18} color="#dc2626" />
+            <span className="fw-bold text-dark" style={{ fontSize: 15 }}>Progressive Penalty Records</span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
-            Appealed or excused penalties
-          </p>
+          <span className="badge bg-light text-secondary border" style={{ fontSize: 11 }}>
+            {penalties.length} Total Records
+          </span>
         </div>
-      </div>
 
-      {/* Penalties List Table */}
-      <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-700/60 bg-slate-900/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Violation Details</th>
-                <th className="py-3.5 px-4">Occurrence</th>
-                <th className="py-3.5 px-4">Vehicle</th>
-                <th className="py-3.5 px-4">Date Applied</th>
-                <th className="py-3.5 px-4">Fine Amount</th>
-                <th className="py-3.5 px-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/40 text-sm">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                    Loading penalty history...
-                  </td>
-                </tr>
-              ) : penalties.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center">
-                    <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
-                    <p className="text-white font-medium">Clean Record — No Penalties</p>
-                    <p className="text-xs text-slate-400 mt-1">You currently have no progressive penalties or fines on record.</p>
-                  </td>
-                </tr>
-              ) : (
-                penalties.map((penalty, idx) => (
-                  <tr key={penalty.id || idx} className="hover:bg-slate-700/20 transition-colors">
-                    {/* Violation Type */}
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-white">
-                        {penalty.alertType?.replace(/_/g, ' ') || penalty.penaltyType || 'Violation'}
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5 max-w-sm truncate">
-                        {penalty.reason || penalty.notes || `Progressive penalty record #${penalty.occurrenceNumber || 1}`}
-                      </div>
-                    </td>
-
-                    {/* Occurrence */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium bg-slate-700/60 text-slate-200">
-                        {penalty.occurrenceNumber ? `Occurrence #${penalty.occurrenceNumber}` : '1st Offense'}
-                      </span>
-                    </td>
-
-                    {/* Vehicle */}
-                    <td className="py-3.5 px-4 whitespace-nowrap font-mono text-xs text-slate-300">
-                      {penalty.vehicleRegistration || 'Assigned Unit'}
-                    </td>
-
-                    {/* Date Applied */}
-                    <td className="py-3.5 px-4 whitespace-nowrap text-xs text-slate-300">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                        {penalty.dateApplied || penalty.calculationTimestamp || penalty.createdAt
-                          ? new Date(penalty.dateApplied || penalty.calculationTimestamp || penalty.createdAt).toLocaleString()
-                          : 'Recorded'}
-                      </div>
-                    </td>
-
-                    {/* Fine Amount */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className="font-mono font-bold text-rose-400 text-sm">
-                        ₹{Number(penalty.monetaryAmount || 0).toLocaleString('en-IN')}
-                      </span>
-                    </td>
-
-                    {/* Status */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
-                        penalty.status === 'WAIVED' || penalty.status === 'REVOKED'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                          : penalty.status === 'ACTIVE'
-                          ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                      }`}>
-                        {penalty.status || 'ACTIVE'}
-                      </span>
-                    </td>
+        <div className="card-body p-0">
+          {loading ? (
+            <div className="py-5 text-center text-muted">
+              <Spinner animation="border" variant="success" size="sm" className="mb-2" />
+              <div style={{ fontSize: 13 }}>Loading penalty history…</div>
+            </div>
+          ) : penalties.length === 0 ? (
+            <div className="py-5 text-center">
+              <CheckCircle2 size={36} className="text-success mb-2 opacity-75" />
+              <h5 className="fw-bold text-dark mt-1">Clean Record — No Penalties</h5>
+              <p className="text-muted small mb-0">You currently have no progressive penalties or fines on record.</p>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover align-middle mb-0" style={{ fontSize: 13 }}>
+                <thead className="table-light">
+                  <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                    <th className="ps-4">Violation Details</th>
+                    <th>Occurrence</th>
+                    <th>Vehicle</th>
+                    <th>Date Applied</th>
+                    <th>Fine Amount</th>
+                    <th className="pe-4">Status</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {penalties.map((penalty, idx) => (
+                    <tr key={penalty.id || idx}>
+                      {/* Violation Details */}
+                      <td className="ps-4">
+                        <strong className="text-dark">
+                          {penalty.alertType?.replace(/_/g, ' ') || penalty.penaltyType || 'Violation'}
+                        </strong>
+                        <div className="text-muted" style={{ fontSize: 11, maxWidth: 360 }}>
+                          {penalty.reason || penalty.notes || `Progressive penalty record #${penalty.occurrenceNumber || 1}`}
+                        </div>
+                      </td>
+
+                      {/* Occurrence */}
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: '#f1f5f9',
+                            color: '#334155',
+                            border: '1px solid #e2e8f0',
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {penalty.occurrenceNumber ? `Occurrence #${penalty.occurrenceNumber}` : '1st Offense'}
+                        </span>
+                      </td>
+
+                      {/* Vehicle */}
+                      <td>
+                        <div className="d-flex align-items-center gap-1.5">
+                          <Truck size={14} className="text-muted" />
+                          <span className="font-monospace text-dark" style={{ fontSize: 12 }}>
+                            {penalty.vehicleRegistration || penalty.vehicleCode || 'Assigned Unit'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Date Applied */}
+                      <td className="text-muted" style={{ fontSize: 12 }}>
+                        {formatDateTime(penalty.dateApplied || penalty.calculationTimestamp || penalty.createdAt)}
+                      </td>
+
+                      {/* Fine Amount */}
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: '#fef2f2',
+                            color: '#dc2626',
+                            border: '1px solid #fee2e2',
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            padding: '4px 8px',
+                          }}
+                        >
+                          ₹{Number(penalty.monetaryAmount || 0).toLocaleString('en-IN')}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td className="pe-4">
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor:
+                              penalty.status === 'WAIVED' || penalty.status === 'REVOKED'
+                                ? '#ecfdf5'
+                                : penalty.status === 'ACTIVE'
+                                ? '#fef2f2'
+                                : '#fffbeb',
+                            color:
+                              penalty.status === 'WAIVED' || penalty.status === 'REVOKED'
+                                ? '#059669'
+                                : penalty.status === 'ACTIVE'
+                                ? '#dc2626'
+                                : '#d97706',
+                            border: `1px solid ${
+                              penalty.status === 'WAIVED' || penalty.status === 'REVOKED'
+                                ? '#a7f3d0'
+                                : penalty.status === 'ACTIVE'
+                                ? '#fee2e2'
+                                : '#fef3c7'
+                            }`,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          {penalty.status || 'ACTIVE'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -1,9 +1,39 @@
 import React, { useState, useEffect } from 'react';
+import { Card, Table, Badge, Button, Spinner, Alert } from 'react-bootstrap';
 import { 
   Navigation, Clock, MapPin, Truck, ChevronLeft, 
   ChevronRight, RefreshCw, Gauge, AlertTriangle, CheckCircle 
 } from 'lucide-react';
 import { driverPortalApi } from '../../api/driverPortal';
+
+const formatDateTime = (dt) => {
+  if (!dt) return '—';
+  try {
+    return new Date(dt).toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return dt;
+  }
+};
+
+const formatTimeOnly = (dt) => {
+  if (!dt) return '—';
+  try {
+    return new Date(dt).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  } catch {
+    return dt;
+  }
+};
 
 export default function DriverTrips() {
   const [trips, setTrips] = useState([]);
@@ -35,7 +65,7 @@ export default function DriverTrips() {
   }, []);
 
   const formatDuration = (seconds) => {
-    if (!seconds && seconds !== 0) return 'N/A';
+    if (!seconds && seconds !== 0) return '—';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     if (hrs > 0) return `${hrs}h ${mins}m`;
@@ -43,172 +73,214 @@ export default function DriverTrips() {
   };
 
   return (
-    <div className="space-y-6">
+    <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">My Trips</h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Complete log of completed routes, distance covered, duration, and safety incidents
+          <h1 className="h3 mb-1 fw-bold" style={{ color: '#0f172a' }}>My Trips</h1>
+          <p className="text-muted mb-0" style={{ fontSize: 13 }}>
+            Complete log of driven routes, distance covered, duration, and safety incidents.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-400">
-            Total Trips: <strong className="text-white font-mono">{totalElements}</strong>
+        <div className="d-flex align-items-center gap-3">
+          <span className="text-muted" style={{ fontSize: 13 }}>
+            Total Trips: <strong className="text-dark font-monospace">{totalElements}</strong>
           </span>
-          <button
+          <Button
+            variant="outline-secondary"
+            size="sm"
             onClick={() => fetchTrips(page)}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors"
+            disabled={loading}
+            className="d-flex align-items-center gap-1.5"
+            style={{ borderRadius: 8, fontSize: 12 }}
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
-          </button>
+            <RefreshCw size={13} className={loading ? 'spin' : ''} />
+            <span>Refresh</span>
+          </Button>
         </div>
       </div>
 
-      {/* Trips Table */}
-      <div className="bg-slate-800/60 backdrop-blur border border-slate-700/60 rounded-2xl overflow-hidden shadow-xl">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-700/60 bg-slate-900/40 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                <th className="py-3.5 px-4">Trip Timeline</th>
-                <th className="py-3.5 px-4">Vehicle</th>
-                <th className="py-3.5 px-4">Distance & Duration</th>
-                <th className="py-3.5 px-4">Speed / Route</th>
-                <th className="py-3.5 px-4">Safety Events</th>
-                <th className="py-3.5 px-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/40 text-sm">
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400">
-                    <div className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
-                    Fetching trip logs...
-                  </td>
-                </tr>
-              ) : trips.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center">
-                    <Navigation className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                    <p className="text-white font-medium">No Trips Found</p>
-                    <p className="text-xs text-slate-400 mt-1">No recorded trips exist under this driver profile.</p>
-                  </td>
-                </tr>
-              ) : (
-                trips.map(trip => (
-                  <tr key={trip.id} className="hover:bg-slate-700/20 transition-colors">
-                    {/* Timeline */}
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-white text-xs">
-                        {trip.startTime ? new Date(trip.startTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
-                      </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 text-slate-500" />
-                        <span>to: {trip.endTime ? new Date(trip.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In Progress'}</span>
-                      </div>
-                    </td>
+      {error && (
+        <Alert variant="danger" className="mb-4 rounded-3 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <AlertTriangle size={18} />
+            <span>{error}</span>
+          </div>
+          <Button variant="outline-danger" size="sm" onClick={() => fetchTrips(page)}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
-                    {/* Vehicle */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <Truck className="w-4 h-4 text-emerald-400" />
-                        <div>
-                          <div className="font-mono text-xs font-bold text-white">
-                            {trip.vehicleCode || 'N/A'}
-                          </div>
-                          <div className="text-[11px] text-slate-400">
-                            {trip.vehicleRegistrationNumber || ''}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Distance & Duration */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <div className="font-mono font-bold text-white text-xs">
-                        {trip.distanceKm ? `${Number(trip.distanceKm).toFixed(1)} km` : '0.0 km'}
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        {formatDuration(trip.durationSeconds)}
-                      </div>
-                    </td>
-
-                    {/* Speed & Route */}
-                    <td className="py-3.5 px-4">
-                      <div className="text-xs text-slate-200 flex items-center gap-1">
-                        <Gauge className="w-3.5 h-3.5 text-teal-400" />
-                        <span>Avg: {trip.averageSpeedKmph ? `${Number(trip.averageSpeedKmph).toFixed(0)} km/h` : 'N/A'}</span>
-                        {trip.maxSpeedKmph && (
-                          <span className="text-slate-400 text-[11px]"> (Max: {Number(trip.maxSpeedKmph).toFixed(0)})</span>
-                        )}
-                      </div>
-                      {trip.primaryRoad && (
-                        <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5 truncate max-w-[200px]">
-                          <MapPin className="w-3 h-3 text-slate-500 flex-shrink-0" />
-                          <span className="truncate">{trip.primaryRoad}</span>
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Safety Events */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      {(trip.alertCount > 0 || trip.overspeedEvents > 0 || trip.harshBrakingEvents > 0) ? (
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                            <AlertTriangle className="w-3 h-3" />
-                            {trip.alertCount || (trip.overspeedEvents || 0) + (trip.harshBrakingEvents || 0)} Alerts
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                          <CheckCircle className="w-3 h-3" /> Clean
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold border ${
-                        trip.status === 'COMPLETED'
-                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                          : trip.status === 'IN_PROGRESS' || trip.status === 'RUNNING'
-                          ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 animate-pulse'
-                          : 'bg-slate-700 text-slate-300 border-slate-600'
-                      }`}>
-                        {trip.status || 'COMPLETED'}
-                      </span>
-                    </td>
+      {/* Trips Table Card */}
+      <div className="card border-0 shadow-sm" style={{ borderRadius: 14 }}>
+        <div className="card-body p-0">
+          {loading ? (
+            <div className="py-5 text-center text-muted">
+              <Spinner animation="border" variant="success" size="sm" className="mb-2" />
+              <div style={{ fontSize: 13 }}>Fetching trip logs…</div>
+            </div>
+          ) : trips.length === 0 ? (
+            <div className="py-5 text-center">
+              <Navigation size={36} className="text-muted mb-2 opacity-50" />
+              <h5 className="fw-bold text-dark mt-1">No Trips Found</h5>
+              <p className="text-muted small mb-0">No recorded trips exist under this driver profile.</p>
+            </div>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-hover align-middle mb-0" style={{ fontSize: 13 }}>
+                <thead className="table-light">
+                  <tr style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#64748b' }}>
+                    <th className="ps-4">Trip Timeline</th>
+                    <th>Vehicle</th>
+                    <th>Distance & Duration</th>
+                    <th>Speed & Route</th>
+                    <th>Safety Events</th>
+                    <th className="pe-4">Status</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {trips.map((trip) => (
+                    <tr key={trip.id}>
+                      {/* Timeline */}
+                      <td className="ps-4">
+                        <strong className="text-dark" style={{ fontSize: 13 }}>
+                          {formatDateTime(trip.startTime)}
+                        </strong>
+                        <div className="text-muted" style={{ fontSize: 11 }}>
+                          End: {trip.endTime ? formatDateTime(trip.endTime) : 'In Progress'}
+                        </div>
+                      </td>
+
+                      {/* Vehicle */}
+                      <td>
+                        <div className="d-flex align-items-center gap-2">
+                          <Truck size={16} className="text-muted" />
+                          <div>
+                            <strong className="text-dark font-monospace" style={{ fontSize: 12 }}>
+                              {trip.vehicleCode || '—'}
+                            </strong>
+                            {trip.vehicleRegistrationNumber && (
+                              <div className="text-muted" style={{ fontSize: 11 }}>
+                                {trip.vehicleRegistrationNumber}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Distance & Duration */}
+                      <td>
+                        <div className="fw-bold text-dark">
+                          {trip.distanceKm ? `${Number(trip.distanceKm).toFixed(1)} km` : '0.0 km'}
+                        </div>
+                        <div className="text-muted" style={{ fontSize: 11 }}>
+                          {formatDuration(trip.durationSeconds)}
+                        </div>
+                      </td>
+
+                      {/* Speed & Route */}
+                      <td>
+                        <div className="d-flex align-items-center gap-1.5 text-dark" style={{ fontSize: 12 }}>
+                          <Gauge size={13} className="text-muted" />
+                          <span>Avg: {trip.averageSpeedKmph ? `${Math.round(trip.averageSpeedKmph)} km/h` : '—'}</span>
+                          {trip.maxSpeedKmph && (
+                            <span className="text-muted" style={{ fontSize: 11 }}>
+                              (Max: {Math.round(trip.maxSpeedKmph)})
+                            </span>
+                          )}
+                        </div>
+                        {trip.primaryRoad && (
+                          <div className="text-muted text-truncate mt-0.5" style={{ fontSize: 11, maxWidth: 200 }}>
+                            <MapPin size={11} className="me-1 text-secondary opacity-75" />
+                            {trip.primaryRoad}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Safety Events */}
+                      <td>
+                        {(trip.alertCount > 0 || trip.overspeedEvents > 0 || trip.harshBrakingEvents > 0) ? (
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: '#fef2f2',
+                              color: '#dc2626',
+                              border: '1px solid #fee2e2',
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            <AlertTriangle size={11} className="me-1" />
+                            {trip.alertCount || (trip.overspeedEvents || 0) + (trip.harshBrakingEvents || 0)} Incidents
+                          </span>
+                        ) : (
+                          <span
+                            className="badge"
+                            style={{
+                              backgroundColor: '#ecfdf5',
+                              color: '#059669',
+                              border: '1px solid #a7f3d0',
+                              fontSize: 11,
+                              fontWeight: 600,
+                            }}
+                          >
+                            <CheckCircle size={11} className="me-1" /> Clean
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="pe-4">
+                        <span
+                          className="badge"
+                          style={{
+                            backgroundColor: trip.status === 'COMPLETED' ? '#ecfdf5' : '#eff6ff',
+                            color: trip.status === 'COMPLETED' ? '#059669' : '#2563eb',
+                            border: `1px solid ${trip.status === 'COMPLETED' ? '#a7f3d0' : '#bfdbfe'}`,
+                            fontSize: 10,
+                            fontWeight: 700,
+                            textTransform: 'uppercase',
+                          }}
+                        >
+                          {trip.status || 'COMPLETED'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="p-4 border-t border-slate-700/60 bg-slate-900/40 flex items-center justify-between text-xs text-slate-400">
-            <div>
-              Showing Page <span className="font-semibold text-white">{page + 1}</span> of{' '}
-              <span className="font-semibold text-white">{totalPages}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
+          <div className="card-footer bg-white border-top py-3 px-4 d-flex align-items-center justify-content-between">
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              Showing Page <strong className="text-dark">{page + 1}</strong> of{' '}
+              <strong className="text-dark">{totalPages}</strong>
+            </span>
+            <div className="d-flex align-items-center gap-2">
+              <Button
+                variant="light"
+                size="sm"
                 onClick={() => fetchTrips(Math.max(0, page - 1))}
                 disabled={page === 0 || loading}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+                className="d-flex align-items-center border"
               >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
+                <ChevronLeft size={16} />
+              </Button>
+              <Button
+                variant="light"
+                size="sm"
                 onClick={() => fetchTrips(Math.min(totalPages - 1, page + 1))}
                 disabled={page >= totalPages - 1 || loading}
-                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+                className="d-flex align-items-center border"
               >
-                <ChevronRight className="w-4 h-4" />
-              </button>
+                <ChevronRight size={16} />
+              </Button>
             </div>
           </div>
         )}

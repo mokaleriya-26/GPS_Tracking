@@ -24,6 +24,9 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
     @Query("SELECT COUNT(t) FROM Trip t WHERE t.driver.id = :driverId")
     long countByDriverId(Long driverId);
 
+    @Query("SELECT COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.driver.id = :driverId")
+    Double sumDistanceByDriverId(Long driverId);
+
     @Query("SELECT SUM(t.distanceKm) FROM Trip t WHERE t.driver.id = :driverId AND t.startTime >= :from AND t.startTime < :to")
     Double sumDistanceByDriverAndDateRange(Long driverId, LocalDateTime from, LocalDateTime to);
 
@@ -90,4 +93,7 @@ public interface TripRepository extends JpaRepository<Trip, Long> {
 
     @Query("SELECT t FROM Trip t WHERE t.distanceKm IS NOT NULL ORDER BY t.distanceKm DESC")
     List<Trip> findLongestTrip();
+
+    @Query("SELECT t.driver.id, COUNT(t), COALESCE(SUM(t.distanceKm), 0) FROM Trip t WHERE t.driver IS NOT NULL GROUP BY t.driver.id")
+    List<Object[]> getAllDriverTripAggregates();
 }
