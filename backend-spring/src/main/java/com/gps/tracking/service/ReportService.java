@@ -4,6 +4,7 @@ import com.gps.tracking.dto.*;
 import com.gps.tracking.entity.*;
 import com.gps.tracking.exception.ResourceNotFoundException;
 import com.gps.tracking.repository.*;
+import com.gps.tracking.security.SecurityUtils;
 import com.itextpdf.kernel.colors.ColorConstants;
 import com.itextpdf.kernel.colors.DeviceRgb;
 import com.itextpdf.kernel.events.Event;
@@ -29,6 +30,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.math.BigDecimal;
@@ -47,6 +49,7 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional(readOnly = true)
 public class ReportService {
 
     public static final ZoneId ASIA_KOLKATA = ZoneId.of("Asia/Kolkata");
@@ -96,6 +99,19 @@ public class ReportService {
         LocalDateTime to   = endDate.plusDays(1).atStartOfDay();
 
         String rType = req.getReportType() != null ? req.getReportType().toUpperCase() : "MONTHLY";
+
+        // Validate vehicle filter authorization if specified
+        if (req.getVehicleId() != null && SecurityUtils.isDriver()) {
+            Long authDriverId = SecurityUtils.getCurrentDriverId();
+            if (authDriverId != null) {
+                boolean authorized = vehicleRepository.findByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(req.getVehicleId()))
+                        || tripRepository.findDistinctVehiclesByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(req.getVehicleId()));
+                if (!authorized) {
+                    throw new org.springframework.security.access.AccessDeniedException(
+                            "Data isolation violation: You are not authorized to filter by this vehicle.");
+                }
+            }
+        }
 
         // 1. Retrieve all trips and alerts for this driver in the half-open date range
         List<Trip> trips = tripRepository.findTripsByDriverAndDateRange(driver.getId(), from, to);
@@ -1381,6 +1397,17 @@ public class ReportService {
         LocalDateTime to = endDate.plusDays(1).atStartOfDay();
 
         Long vehicleId = req.getVehicleId();
+        if (vehicleId != null && SecurityUtils.isDriver()) {
+            Long authDriverId = SecurityUtils.getCurrentDriverId();
+            if (authDriverId != null) {
+                boolean authorized = vehicleRepository.findByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(vehicleId))
+                        || tripRepository.findDistinctVehiclesByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(vehicleId));
+                if (!authorized) {
+                    throw new org.springframework.security.access.AccessDeniedException(
+                            "Data isolation violation: You are not authorized to filter by this vehicle.");
+                }
+            }
+        }
         List<String> alertTypes = (req.getAlertTypes() != null && !req.getAlertTypes().isEmpty()) ? req.getAlertTypes() : null;
         String severity = (req.getSeverity() != null && !req.getSeverity().isBlank() && !"ALL".equalsIgnoreCase(req.getSeverity())) ? req.getSeverity().trim() : null;
         String status = (req.getStatus() != null && !req.getStatus().isBlank() && !"ALL".equalsIgnoreCase(req.getStatus())) ? req.getStatus().trim() : null;
@@ -1610,6 +1637,17 @@ public class ReportService {
         LocalDateTime to = endDate.plusDays(1).atStartOfDay();
 
         Long vehicleId = req.getVehicleId();
+        if (vehicleId != null && SecurityUtils.isDriver()) {
+            Long authDriverId = SecurityUtils.getCurrentDriverId();
+            if (authDriverId != null) {
+                boolean authorized = vehicleRepository.findByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(vehicleId))
+                        || tripRepository.findDistinctVehiclesByDriverId(authDriverId).stream().anyMatch(v -> v.getId().equals(vehicleId));
+                if (!authorized) {
+                    throw new org.springframework.security.access.AccessDeniedException(
+                            "Data isolation violation: You are not authorized to filter by this vehicle.");
+                }
+            }
+        }
         List<String> alertTypes = (req.getAlertTypes() != null && !req.getAlertTypes().isEmpty()) ? req.getAlertTypes() : null;
         String severity = (req.getSeverity() != null && !req.getSeverity().isBlank() && !"ALL".equalsIgnoreCase(req.getSeverity())) ? req.getSeverity().trim() : null;
         String status = (req.getStatus() != null && !req.getStatus().isBlank() && !"ALL".equalsIgnoreCase(req.getStatus())) ? req.getStatus().trim() : null;

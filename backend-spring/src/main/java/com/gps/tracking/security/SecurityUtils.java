@@ -21,6 +21,11 @@ public final class SecurityUtils {
         return user != null ? user.getDriverId() : null;
     }
 
+    public static String getCurrentDriverCode() {
+        UserPrincipal user = getCurrentUser();
+        return user != null ? user.getDriverCode() : null;
+    }
+
     public static boolean isAdmin() {
         UserPrincipal user = getCurrentUser();
         return user != null && user.isAdmin();
@@ -50,6 +55,29 @@ public final class SecurityUtils {
 
         if (user.isDriver()) {
             if (requestedDriverId == null || !requestedDriverId.equals(user.getDriverId())) {
+                throw new AccessDeniedException("Data isolation violation: You are not authorized to view or access records for another driver.");
+            }
+        }
+    }
+
+    /**
+     * Enforces data isolation by Driver Code:
+     * If the current user is a driver (USER role), verifies that the requested driverCode
+     * strictly matches the authenticated driver's code.
+     * Admins are permitted full access.
+     */
+    public static void validateDriverCodeAccess(String requestedDriverCode) {
+        UserPrincipal user = getCurrentUser();
+        if (user == null) {
+            return;
+        }
+
+        if (user.isAdmin()) {
+            return;
+        }
+
+        if (user.isDriver()) {
+            if (requestedDriverCode == null || !requestedDriverCode.trim().equalsIgnoreCase(user.getDriverCode())) {
                 throw new AccessDeniedException("Data isolation violation: You are not authorized to view or access records for another driver.");
             }
         }

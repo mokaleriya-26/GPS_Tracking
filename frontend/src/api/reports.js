@@ -31,5 +31,12 @@ export const generateDriverAlertReport = (driverId, body) =>
 export const generateFleetAlertReport = (body) =>
   api.post('/api/reports/fleet/alert-based', body).then(r => r.data?.data);
 
-export const getPdfUrl = (reportId) => `${BASE}/api/reports/${reportId}/pdf`;
-export const getDownloadUrl = (reportId) => `${BASE}/api/reports/${reportId}/download`;
+export const getPdfUrl = (reportId) => {
+  const token = localStorage.getItem('trackfleet_token');
+  return token ? `${BASE}/api/reports/${reportId}/pdf?token=${encodeURIComponent(token)}` : `${BASE}/api/reports/${reportId}/pdf`;
+};
+
+export const getDownloadUrl = (reportId) => {
+  const token = localStorage.getItem('trackfleet_token');
+  return token ? `${BASE}/api/reports/${reportId}/download?token=${encodeURIComponent(token)}` : `${BASE}/api/reports/${reportId}/download`;
+};

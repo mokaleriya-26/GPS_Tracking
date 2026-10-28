@@ -178,10 +178,24 @@ public class DriverPortalService {
             throw new ResourceNotFoundException("No driver associated with the current session.");
         }
 
-        // Strictly lock driverId to authenticated driver — prevent data leakage!
+        // Strictly lock driverId and driverCode to authenticated driver — prevent data leakage!
         req.setDriverId(driverId);
+        Driver driver = driverRepository.findById(driverId)
+                .orElseThrow(() -> new ResourceNotFoundException("Driver", driverId));
+        req.setDriverCode(driver.getCode());
+
+        // Validate vehicle if provided
+        if (req.getVehicleId() != null) {
+            boolean authorized = vehicleRepository.findByDriverId(driverId).stream().anyMatch(v -> v.getId().equals(req.getVehicleId()))
+                    || tripRepository.findDistinctVehiclesByDriverId(driverId).stream().anyMatch(v -> v.getId().equals(req.getVehicleId()));
+            if (!authorized) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Data isolation violation: You are not authorized to filter by this vehicle.");
+            }
+        }
 
         String type = req.getReportType() != null ? req.getReportType().toUpperCase() : "MONTHLY";
+        req.setReportType(type);
         if ("ALERT_BASED".equals(type) || "ALERT".equals(type)) {
             return reportService.generateDriverAlertReport(req);
         } else {

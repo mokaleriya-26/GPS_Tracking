@@ -2,6 +2,7 @@ package com.gps.tracking.controller;
 
 import com.gps.tracking.dto.*;
 import com.gps.tracking.security.SecurityUtils;
+import com.gps.tracking.security.UserPrincipal;
 import com.gps.tracking.service.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,6 +26,9 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverMonthly(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
         SecurityUtils.validateDriverAccess(driverId);
+        if (req.getDriverCode() != null) {
+            SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+        }
         req.setDriverId(driverId);
         req.setReportType("MONTHLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
@@ -35,6 +39,9 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverDaily(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
         SecurityUtils.validateDriverAccess(driverId);
+        if (req.getDriverCode() != null) {
+            SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+        }
         req.setDriverId(driverId);
         req.setReportType("DAILY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
@@ -45,6 +52,9 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverWeekly(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
         SecurityUtils.validateDriverAccess(driverId);
+        if (req.getDriverCode() != null) {
+            SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+        }
         req.setDriverId(driverId);
         req.setReportType("WEEKLY");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
@@ -55,6 +65,9 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverCustom(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
         SecurityUtils.validateDriverAccess(driverId);
+        if (req.getDriverCode() != null) {
+            SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+        }
         req.setDriverId(driverId);
         req.setReportType("CUSTOM");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverReport(req)));
@@ -104,6 +117,9 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateDriverAlertBased(
             @PathVariable Long driverId, @RequestBody ReportRequestDTO req) {
         SecurityUtils.validateDriverAccess(driverId);
+        if (req.getDriverCode() != null) {
+            SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+        }
         req.setDriverId(driverId);
         req.setReportType("ALERT_BASED");
         return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
@@ -123,9 +139,25 @@ public class ReportController {
     public ResponseEntity<ApiResponse<ReportResponseDTO>> generateAlertBased(
             @RequestBody ReportRequestDTO req) {
         req.setReportType("ALERT_BASED");
+        UserPrincipal user = SecurityUtils.getCurrentUser();
+        if (user != null && user.isDriver()) {
+            if (req.getDriverId() != null) {
+                SecurityUtils.validateDriverAccess(req.getDriverId());
+            }
+            if (req.getDriverCode() != null) {
+                SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
+            }
+            req.setDriverId(user.getDriverId());
+            req.setDriverCode(user.getDriverCode());
+            return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
+        }
+
         if (req.getDriverId() != null || req.getDriverCode() != null) {
             if (req.getDriverId() != null) {
                 SecurityUtils.validateDriverAccess(req.getDriverId());
+            }
+            if (req.getDriverCode() != null) {
+                SecurityUtils.validateDriverCodeAccess(req.getDriverCode());
             }
             return ResponseEntity.ok(ApiResponse.ok(reportService.generateDriverAlertReport(req)));
         } else {
@@ -155,6 +187,34 @@ public class ReportController {
     }
 
     private ResponseEntity<FileSystemResource> servePdf(String reportId, boolean download) {
+        if (reportId == null || !reportId.matches("^[a-zA-Z0-9_-]+$")) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        UserPrincipal user = SecurityUtils.getCurrentUser();
+        if (user == null) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Authentication required: You must be logged in to view report documents.");
+        }
+
+        if (user.isDriver()) {
+            // Drivers cannot access fleet-wide reports
+            if (reportId.startsWith("FLTRPT_") || reportId.startsWith("FLTALRTRPT_")) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Data isolation violation: Drivers are not authorized to view fleet-wide reports.");
+            }
+            // Drivers can only access their own driver reports
+            String driverCode = user.getDriverCode();
+            boolean isOwnReport = (driverCode != null && !driverCode.isBlank()) && (
+                reportId.startsWith("DRVRPT_" + driverCode + "_") ||
+                reportId.startsWith("DRVALRTRPT_" + driverCode + "_")
+            );
+            if (!isOwnReport) {
+                throw new org.springframework.security.access.AccessDeniedException(
+                        "Data isolation violation: You are not authorized to view this report.");
+            }
+        }
+
         File file = new File(reportService.getReportFilePath(reportId));
         if (!file.exists()) return ResponseEntity.notFound().build();
         FileSystemResource resource = new FileSystemResource(file);
